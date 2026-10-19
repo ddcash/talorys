@@ -1,0 +1,23 @@
+{
+  "manifest_version": 1,
+  "installation_id": "weubbr9y",
+  "account_id": "5ca657d8289913b0bb23bb59c9af0d35",
+  "account_name": "R.cash88@gmail.com's Account",
+  "worker_name": "talorys-weubbr9y-agent",
+  "pages_project_name": "talorys-weubbr9y-web",
+  "public_url": "https://talorys-weubbr9y-web.pages.dev",
+  "deployment_version": "0.1.7",
+  "agent_name": "Talorys",
+  "timezone": "America/Chicago",
+  "semantic": false,
+  "status": "deployed",
+  "steps": [
+    "scaffold",
+    "worker",
+    "secrets",
+    "pages",
+    "verified"
+  ],
+  "created_at": "2026-10-19T13:20:53.878Z",
+  "updated_at": "2026-10-19T13:21:24.204Z"
+}

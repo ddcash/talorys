@@ -13,3 +13,5 @@ packages/create-talorys/templates/
 .env
 .env.*
 test-results/
+
+graphify-out/

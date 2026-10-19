@@ -208,6 +208,51 @@ export interface SessionInfo {
   current: boolean;
 }
 
+// ---------- MCP (Model Context Protocol) ----------
+
+export interface McpToolSummary {
+  name: string;
+  description: string;
+  inputSchema?: Record<string, unknown>;
+}
+
+export interface McpServer {
+  id: string;
+  name: string;
+  url: string;
+  auth_token: string | null;
+  enabled: boolean;
+  is_memory_provider: boolean;
+  memory_mode: "optimized" | "all_tools";
+  cached_tools: McpToolSummary[];
+  tools_updated_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export const mcpServerCreateSchema = z.object({
+  name: shortText(100),
+  url: z.string().url("Must be a valid URL"),
+  auth_token: z.string().max(1000).nullable().optional(),
+  enabled: z.boolean().optional().default(true),
+  is_memory_provider: z.boolean().optional().default(false),
+  memory_mode: z.enum(["optimized", "all_tools"]).optional().default("optimized"),
+});
+
+export const mcpServerUpdateSchema = z.object({
+  name: shortText(100),
+  url: z.string().url("Must be a valid URL"),
+  auth_token: z.string().max(1000).nullable(),
+  enabled: z.boolean(),
+  is_memory_provider: z.boolean(),
+  memory_mode: z.enum(["optimized", "all_tools"]),
+}).partial();
+
+export const mcpTestSchema = z.object({
+  url: z.string().url("Must be a valid URL"),
+  auth_token: z.string().max(1000).nullable().optional(),
+});
+
 // ---------- Input schemas ----------
 
 export const taskCreateSchema = z.object({

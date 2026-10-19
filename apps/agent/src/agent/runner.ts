@@ -7,6 +7,8 @@ import { clip } from "../services/text";
 import { buildSystemPrompt } from "./prompt";
 import { SUMMARIZE_THRESHOLD, buildContextWindow, memoryTokenBudget, selectRelevantMemories, summarizationPrompt } from "./memory";
 import type { RunnerExtensions } from "../semantic/hooks";
+import { McpClient } from "../mcp/client";
+import { getAllMcpTools } from "../mcp/tools";
 
 export interface TurnInput {
   conversationId?: string;
@@ -116,6 +118,15 @@ export class AgentRunner {
       const selected = this.ext ? await this.ext.selectMemories(userMessage.content) : selectRelevantMemories(s.memories, userMessage.content);
       const memories = s.memoryHistory.promptMemories(selected, memoryTokenBudget(limits));
       const items = this.ext?.selectItems ? await this.ext.selectItems(userMessage.content) : undefined;
+
+      // Recall context from external MCP memory provider (e.g. Inkstone Knowledge Base)
+      let mcpMemoryContext: string | null = null;
+      const memoryServer = s.mcp.getMemoryProvider();
+      if (memoryServer) {
+        mcpMemoryContext = await McpClient.recallFromInkstone(userMessage.content, memoryServer);
+      }
+      const combinedItems = [items, mcpMemoryContext].filter(Boolean).join("\n\n") || undefined;
+
       const history = s.pendingActions
         .withCurrentStatus(s.conversations.messages(conversation.id, { limit: 200 }))
         .filter((m) => m.role === "user" || m.status === "complete")
@@ -129,7 +140,7 @@ export class AgentRunner {
         autoMemory: settings.autoMemory,
         memories,
         conversationSummary: summary,
-        ...(items ? { items } : {}),
+        ...(combinedItems ? { items: combinedItems } : {}),
       });
       const historyBudget = Math.max(500, limits.maxContextTokens - estimateTokens(baseSystem) - 600);
       let window = buildContextWindow(history, historyBudget, summaryUpto);
@@ -166,12 +177,15 @@ export class AgentRunner {
             autoMemory: settings.autoMemory,
             memories,
             conversationSummary: summary,
-            ...(items ? { items } : {}),
+            ...(combinedItems ? { items: combinedItems } : {}),
           });
 
-      // 3. Tools with per-turn limits.
+      // 3. Tools with per-turn limits: native tools + active MCP tools.
+      const enabledMcp = s.mcp.listEnabled();
+      const mcpTools = getAllMcpTools(enabledMcp);
+      const combinedTools = [...(this.ext?.tools ?? ALL_TOOLS), ...mcpTools];
       const executor = new ToolExecutor(
-        this.ext?.tools ?? ALL_TOOLS,
+        combinedTools,
         { services: s, timezone: settings.timezone, mode: "chat", conversationId: conversation.id },
         { maxToolCalls: limits.maxToolCalls },
       );

@@ -328,6 +328,26 @@ export const MIGRATIONS: Migration[] = [
       )`,
     ],
   },
+  {
+    version: 11,
+    name: "mcp servers and inkstone memory integration",
+    statements: [
+      `CREATE TABLE IF NOT EXISTS tal_mcp_servers (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        url TEXT NOT NULL,
+        auth_token TEXT,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        is_memory_provider INTEGER NOT NULL DEFAULT 0,
+        memory_mode TEXT NOT NULL DEFAULT 'optimized',
+        cached_tools TEXT NOT NULL DEFAULT '[]',
+        tools_updated_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )`,
+      `CREATE INDEX IF NOT EXISTS tal_mcp_servers_enabled ON tal_mcp_servers(enabled)`,
+    ],
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;

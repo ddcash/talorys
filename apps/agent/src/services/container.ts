@@ -14,6 +14,7 @@ import { MemoryHistoryService, type MemoryHistoryHooks } from "../memory";
 import { PushSubscriptionRepository } from "../push/repository";
 import { PushService } from "../push/service";
 import { RemoteTokenService } from "../remote/tokens";
+import { McpRepository } from "../db/repositories/mcp";
 
 /** All data services for the single owner, bound to one Durable Object's storage. */
 export interface Services {
@@ -34,6 +35,7 @@ export interface Services {
   memoryHistory: MemoryHistoryService;
   push: PushService;
   remote: RemoteTokenService;
+  mcp: McpRepository;
 }
 
 /** `background` keeps work alive after the request or alarm that started it (the Durable Object's waitUntil). */
@@ -77,5 +79,6 @@ export function createServices(
     memoryHistory: new MemoryHistoryService(db, memories, settings, usage, activity, memoryHooks),
     push,
     remote: new RemoteTokenService(db, settings, env.SESSION_SECRET),
+    mcp: new McpRepository(db),
   };
 }

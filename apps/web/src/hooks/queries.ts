@@ -14,6 +14,7 @@ import type {
   Settings,
   Task,
   UsageReport,
+  McpServer,
 } from "@talorys/shared";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
@@ -37,6 +38,7 @@ export const keys = {
   update: ["system", "update"] as const,
   remoteStatus: ["remote", "status"] as const,
   remoteTokens: ["remote", "tokens"] as const,
+  mcpServers: ["mcp", "servers"] as const,
 };
 
 export function useSettings() {
@@ -188,6 +190,10 @@ export function useRemoteStatus() {
 
 export function useRemoteTokens() {
   return useQuery({ queryKey: keys.remoteTokens, queryFn: () => api<{ tokens: RemoteTokenInfo[] }>("/remote/tokens").then((r) => r.tokens) });
+}
+
+export function useMcpServers() {
+  return useQuery({ queryKey: keys.mcpServers, queryFn: () => api<{ servers: McpServer[] }>("/mcp/servers").then((r) => r.servers) });
 }
 
 /**
