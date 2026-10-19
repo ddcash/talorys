@@ -30,8 +30,8 @@ chatRoutes.get("/conversations/:id", (c) => {
 });
 
 chatRoutes.patch("/conversations/:id", async (c) => {
-  const { title } = await body(c, conversationUpdateSchema);
-  const { summary: _s, summary_upto: _u, ...rest } = c.env.agent.services.conversations.rename(c.req.param("id"), title);
+  const patch = await body(c, conversationUpdateSchema);
+  const { summary: _s, summary_upto: _u, ...rest } = c.env.agent.services.conversations.updateOverrides(c.req.param("id"), patch);
   return c.json({ conversation: rest });
 });
 

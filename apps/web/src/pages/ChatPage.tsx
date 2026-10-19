@@ -15,6 +15,7 @@ import {
   Plus,
   RotateCcw,
   Search,
+  Sparkles,
   Square,
   Trash2,
   XCircle,
@@ -234,6 +235,135 @@ export function ChatPage() {
   );
 }
 
+function ConversationModelSwitcher({
+  conversation,
+}: {
+  conversation?: Conversation;
+}) {
+  const settings = useSettings();
+  const [open, setOpen] = useState(false);
+  const activeProvider = conversation?.provider_override ?? settings.data?.provider ?? "cloudflare";
+  const activeModel = conversation?.model_override ?? settings.data?.model ?? "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+  const isOverridden = Boolean(conversation?.provider_override || conversation?.model_override);
+
+  const [provider, setProvider] = useState<string>(conversation?.provider_override ?? "");
+  const [model, setModel] = useState<string>(conversation?.model_override ?? "");
+
+  const update = useApiMutation(
+    (input: { provider_override: string | null; model_override: string | null }) =>
+      api<{ conversation: Conversation }>(`/conversations/${conversation!.id}`, {
+        method: "PATCH",
+        body: input,
+      }),
+    {
+      invalidate: [["conversation", conversation?.id ?? ""], ["conversations"]],
+      success: "Conversation model updated",
+      onSuccess: () => setOpen(false),
+    },
+  );
+
+  if (!conversation) return null;
+
+  const shortModel = activeModel.split("/").pop() ?? activeModel;
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => {
+          setProvider(conversation.provider_override ?? "");
+          setModel(conversation.model_override ?? "");
+          setOpen(true);
+        }}
+        className={cn(
+          "inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-xs transition-colors",
+          isOverridden
+            ? "border-accent/40 bg-accent/10 text-accent font-medium"
+            : "border-border bg-subtle text-fg-muted hover:text-fg hover:border-border-strong"
+        )}
+        title="Change model or LLM provider for this conversation"
+      >
+        <Sparkles className="h-3 w-3 shrink-0" />
+        <span className="max-w-[120px] truncate sm:max-w-[160px]">{shortModel}</span>
+        {isOverridden && <span className="text-[10px] opacity-75">(custom)</span>}
+      </button>
+
+      <Dialog
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Conversation Model Override"
+        footer={
+          <>
+            {isOverridden && (
+              <Button
+                variant="ghost"
+                className="text-danger hover:text-danger mr-auto"
+                onClick={() => update.mutate({ provider_override: null, model_override: null })}
+                loading={update.isPending}
+              >
+                Reset to Default
+              </Button>
+            )}
+            <Button variant="ghost" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() =>
+                update.mutate({
+                  provider_override: provider ? (provider as any) : null,
+                  model_override: model ? model.trim() : null,
+                })
+              }
+              loading={update.isPending}
+            >
+              Apply
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <p className="text-xs text-fg-muted">
+            Override the LLM provider and model specifically for this conversation. Leave blank to inherit your default settings ({settings.data?.provider ?? "cloudflare"}: {settings.data?.model}).
+          </p>
+          <div>
+            <label className="text-xs font-medium text-fg-subtle">Provider</label>
+            <select
+              value={provider}
+              onChange={(e) => {
+                const p = e.target.value;
+                setProvider(p);
+                if (p === "workers-ai") setModel("@cf/meta/llama-3.3-70b-instruct-fp8-fast");
+                else if (p === "anthropic") setModel("claude-3-7-sonnet-20250219");
+                else if (p === "openai") setModel("gpt-4o");
+                else if (p === "openrouter") setModel("anthropic/claude-3.7-sonnet");
+                else if (p === "gemini") setModel("gemini-2.0-flash");
+                else setModel("");
+              }}
+              className="mt-1 block w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-fg focus:border-accent focus:outline-none"
+            >
+              <option value="">Inherit Default ({settings.data?.provider ?? "workers-ai"})</option>
+              <option value="workers-ai">Cloudflare Workers AI</option>
+              <option value="anthropic">Anthropic Claude</option>
+              <option value="openai">OpenAI</option>
+              <option value="openrouter">OpenRouter</option>
+              <option value="gemini">Google Gemini</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-fg-subtle">Model ID</label>
+            <Input
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              placeholder="e.g. claude-3-7-sonnet-20250219 or @cf/meta/..."
+              className="mt-1 font-mono text-xs"
+            />
+          </div>
+        </div>
+      </Dialog>
+    </>
+  );
+}
+
 function ChatHeader({
   conversation,
   onOpenHistory,
@@ -251,7 +381,8 @@ function ChatHeader({
         </button>
         <h2 className="truncate text-sm font-medium text-fg">{conversation?.title ?? "New conversation"}</h2>
       </div>
-      <div className="flex shrink-0 items-center gap-1">
+      <div className="flex shrink-0 items-center gap-1.5">
+        <ConversationModelSwitcher conversation={conversation} />
         <ChatUsage />
         <Button variant="ghost" size="sm" onClick={onNew}>
           <Plus className="h-4 w-4" />

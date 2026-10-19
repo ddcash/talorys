@@ -8,6 +8,9 @@ import { SemanticRecallCard } from "../components/SemanticRecallCard";
 import { PushNotificationsCard } from "../components/PushNotificationsCard";
 import { RemoteAccessCard } from "../components/RemoteAccessCard";
 import { McpSettingsCard } from "../components/McpSettingsCard";
+import { RulesSettingsCard } from "../components/RulesSettingsCard";
+import { SkillsSettingsCard } from "../components/SkillsSettingsCard";
+import { AiSettingsCard } from "../components/AiSettingsCard";
 import { UsageBreakdown, UsagePricingNote } from "../components/UsageBreakdown";
 import { keys, useApiMutation, useSessions, useSettings, useSystemInfo, useUpdateStatus, useUsage } from "../hooks/queries";
 import { useSession } from "../hooks/session";
@@ -16,7 +19,7 @@ import { api, ApiError } from "../lib/api";
 import { applyTheme } from "../lib/theme";
 import { cn, relativeTime } from "../lib/utils";
 
-const TABS = ["General", "AI", "Integrations", "Privacy", "Security", "About"] as const;
+const TABS = ["General", "AI & Models", "Rules", "Skills", "Integrations", "Privacy", "Security", "About"] as const;
 type Tab = (typeof TABS)[number];
 
 function Row({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
@@ -45,7 +48,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 export default function SettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const param = searchParams.get("tab");
-  const tab: Tab = TABS.find((t) => t === param) ?? "General";
+  const tab: Tab = TABS.find((t) => t === param || (param === "AI" && t === "AI & Models")) ?? "General";
   const setTab = (t: Tab) => setSearchParams(t === "General" ? {} : { tab: t }, { replace: true });
   const { data: settings, isLoading, error, refetch } = useSettings();
   return (
@@ -77,7 +80,9 @@ export default function SettingsPage() {
         <div className="space-y-8 animate-fade-in">
           {tab === "General" && <GeneralTab settings={settings} />}
           {tab === "General" && <PushNotificationsCard />}
-          {tab === "AI" && <AiTab settings={settings} />}
+          {tab === "AI & Models" && <AiTab settings={settings} />}
+          {tab === "Rules" && <RulesSettingsCard />}
+          {tab === "Skills" && <SkillsSettingsCard />}
           {tab === "Integrations" && <McpSettingsCard />}
           {tab === "Privacy" && <PrivacyTab />}
           {tab === "Security" && <SecurityTab />}
@@ -173,86 +178,16 @@ function GeneralTab({ settings }: { settings: Settings }) {
   );
 }
 
-const LIMIT_FIELDS: { key: keyof Limits; label: string; hint: string }[] = [
-  { key: "maxOutputTokens", label: "Max output tokens", hint: "Upper bound for each AI reply." },
-  { key: "maxContextTokens", label: "Max context tokens", hint: "Recent history sent to the model. Older messages are summarized." },
-  { key: "maxToolCalls", label: "Max tool calls per request", hint: "0 disables tools entirely." },
-  { key: "maxAgentIterations", label: "Max reasoning steps", hint: "Model round-trips per request." },
-  { key: "maxAiRequestsPerDay", label: "Max AI requests per day", hint: "Hard daily cap enforced by Talorys." },
-  { key: "maxScheduledAiRunsPerDay", label: "Max scheduled AI runs per day", hint: "Budget for AI routines. Reminders never use AI." },
-];
-
 function AiTab({ settings }: { settings: Settings }) {
   const save = useSaveSettings();
   const usage = useUsage();
-  const [model, setModel] = useState(settings.model);
-  const [limits, setLimits] = useState<Limits>(settings.limits);
-  const [temperature, setTemperature] = useState(settings.temperature);
-  const dirtyLimits = JSON.stringify(limits) !== JSON.stringify(settings.limits) || temperature !== settings.temperature;
   return (
     <>
-      <Section title="Model">
-        <Row label="Workers AI model" hint="Default: @cf/zai-org/glm-4.7-flash. Must support tool calling.">
-          <form
-            className="flex gap-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (model !== settings.model) save.mutate({ model: model.trim() });
-            }}
-          >
-            <Input value={model} onChange={(e) => setModel(e.target.value)} aria-label="Model id" className="font-mono text-xs" />
-            <Button type="submit" variant="outline" disabled={model === settings.model}>
-              Save
-            </Button>
-          </form>
-        </Row>
-        <Row label="Learn from conversations" hint="Let Talorys save clearly lasting preferences without being asked. Off = only explicit “remember …”.">
-          <div className="flex justify-end">
-            <Switch checked={settings.autoMemory} onChange={(v) => save.mutate({ autoMemory: v })} label="Learn from conversations" />
-          </div>
-        </Row>
-        <Row label="Demo mode" hint="Replaces Workers AI with a simple offline responder. Useful when your AI quota is exhausted. Never enabled automatically.">
-          <div className="flex justify-end">
-            <Switch checked={settings.demoMode} onChange={(v) => save.mutate({ demoMode: v })} label="Demo mode" />
-          </div>
-        </Row>
-      </Section>
-
-      <Section title="Generation & execution limits">
-        <Row label="Temperature" hint="Lower is more focused and predictable.">
-          <div className="flex items-center gap-3">
-            <input type="range" min={0} max={1.5} step={0.1} value={temperature} onChange={(e) => setTemperature(Number(e.target.value))} className="flex-1 accent-[var(--accent)]" aria-label="Temperature" />
-            <span className="w-8 text-right text-sm tabular-nums">{temperature.toFixed(1)}</span>
-          </div>
-        </Row>
-        {LIMIT_FIELDS.map((f) => (
-          <Row key={f.key} label={f.label} hint={`${f.hint} Max ${LIMIT_CEILINGS[f.key]}.`}>
-            <Input
-              type="number"
-              min={0}
-              max={LIMIT_CEILINGS[f.key]}
-              value={limits[f.key]}
-              onChange={(e) => setLimits({ ...limits, [f.key]: Number(e.target.value) })}
-              aria-label={f.label}
-            />
-          </Row>
-        ))}
-        <div className="flex justify-end gap-2 px-5 py-3">
-          <Button
-            variant="ghost"
-            disabled={!dirtyLimits}
-            onClick={() => {
-              setLimits(settings.limits);
-              setTemperature(settings.temperature);
-            }}
-          >
-            Reset
-          </Button>
-          <Button disabled={!dirtyLimits} loading={save.isPending} onClick={() => save.mutate({ limits, temperature })}>
-            Save limits
-          </Button>
-        </div>
-      </Section>
+      <AiSettingsCard
+        settings={settings}
+        onSave={(patch) => save.mutate(patch)}
+        isPending={save.isPending}
+      />
 
       <Section title="Usage">
         {usage.isLoading || !usage.data ? (

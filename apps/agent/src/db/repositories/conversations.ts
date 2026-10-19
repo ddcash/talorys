@@ -47,7 +47,7 @@ export class ConversationRepository {
     if (opts.q) {
       const pattern = likePattern(opts.q);
       return this.db.all<Conversation>(
-        `SELECT c.id, c.title, c.created_at, c.updated_at,
+        `SELECT c.id, c.title, c.created_at, c.updated_at, c.provider_override, c.model_override,
            (SELECT count(*) FROM tal_messages m WHERE m.conversation_id = c.id) AS message_count
          FROM tal_conversations c
          WHERE c.title LIKE ? ESCAPE '\\'
@@ -57,7 +57,7 @@ export class ConversationRepository {
       );
     }
     return this.db.all<Conversation>(
-      `SELECT c.id, c.title, c.created_at, c.updated_at,
+      `SELECT c.id, c.title, c.created_at, c.updated_at, c.provider_override, c.model_override,
          (SELECT count(*) FROM tal_messages m WHERE m.conversation_id = c.id) AS message_count
        FROM tal_conversations c ORDER BY c.updated_at DESC LIMIT ?`,
       opts.limit ?? 200,
@@ -76,7 +76,7 @@ export class ConversationRepository {
 
   create(title = "New conversation"): ConversationRecord {
     const ts = now();
-    const c: ConversationRecord = { id: newId(), title, created_at: ts, updated_at: ts, summary: null, summary_upto: null };
+    const c: ConversationRecord = { id: newId(), title, created_at: ts, updated_at: ts, summary: null, summary_upto: null, provider_override: null, model_override: null };
     this.db.run(
       `INSERT INTO tal_conversations (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)`,
       c.id, c.title, c.created_at, c.updated_at,
@@ -87,6 +87,22 @@ export class ConversationRepository {
   rename(id: string, title: string): ConversationRecord {
     this.require(id);
     this.db.run(`UPDATE tal_conversations SET title = ?, updated_at = ? WHERE id = ?`, title, now(), id);
+    return this.require(id);
+  }
+
+  updateOverrides(id: string, patch: { provider_override?: string | null; model_override?: string | null; title?: string }): ConversationRecord {
+    const current = this.require(id);
+    const provider = patch.provider_override !== undefined ? patch.provider_override : current.provider_override;
+    const model = patch.model_override !== undefined ? patch.model_override : current.model_override;
+    const title = patch.title ?? current.title;
+    this.db.run(
+      `UPDATE tal_conversations SET title = ?, provider_override = ?, model_override = ?, updated_at = ? WHERE id = ?`,
+      title,
+      provider,
+      model,
+      now(),
+      id,
+    );
     return this.require(id);
   }
 

@@ -15,6 +15,8 @@ import type {
   Task,
   UsageReport,
   McpServer,
+  Rule,
+  Skill,
 } from "@talorys/shared";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
@@ -39,7 +41,44 @@ export const keys = {
   remoteStatus: ["remote", "status"] as const,
   remoteTokens: ["remote", "tokens"] as const,
   mcpServers: ["mcp", "servers"] as const,
+  rules: ["rules"] as const,
+  skills: ["skills"] as const,
+  cloudflareModels: ["models", "cloudflare"] as const,
+  presetModels: ["models", "presets"] as const,
 };
+
+export function useRules() {
+  return useQuery({ queryKey: keys.rules, queryFn: () => api<{ rules: Rule[] }>("/rules").then((r) => r.rules) });
+}
+
+export function useSkills() {
+  return useQuery({ queryKey: keys.skills, queryFn: () => api<{ skills: Skill[] }>("/skills").then((r) => r.skills) });
+}
+
+export interface ModelOption {
+  id: string;
+  name: string;
+  description?: string;
+  provider: string;
+  tags?: string[];
+  recommended?: boolean;
+}
+
+export function useCloudflareModels() {
+  return useQuery({
+    queryKey: keys.cloudflareModels,
+    queryFn: () => api<{ models: ModelOption[]; source: string }>("/models/cloudflare"),
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useModelPresets() {
+  return useQuery({
+    queryKey: keys.presetModels,
+    queryFn: () => api<{ presets: Record<string, ModelOption[]> }>("/models/presets").then((r) => r.presets),
+    staleTime: 60 * 60_000,
+  });
+}
 
 export function useSettings() {
   return useQuery({ queryKey: keys.settings, queryFn: () => api<{ settings: Settings }>("/settings").then((r) => r.settings), staleTime: 60_000 });

@@ -348,6 +348,36 @@ export const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS tal_mcp_servers_enabled ON tal_mcp_servers(enabled)`,
     ],
   },
+  {
+    version: 12,
+    name: "rules, skills, and multi-model conversation overrides",
+    statements: [
+      `CREATE TABLE IF NOT EXISTS tal_rules (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT 'general',
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )`,
+      `CREATE INDEX IF NOT EXISTS tal_rules_enabled ON tal_rules(enabled)`,
+      `CREATE TABLE IF NOT EXISTS tal_skills (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT NOT NULL,
+        instructions TEXT NOT NULL,
+        tools_json TEXT NOT NULL DEFAULT '[]',
+        category TEXT NOT NULL DEFAULT 'general',
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )`,
+      `CREATE INDEX IF NOT EXISTS tal_skills_enabled ON tal_skills(enabled)`,
+      `ALTER TABLE tal_conversations ADD COLUMN provider_override TEXT`,
+      `ALTER TABLE tal_conversations ADD COLUMN model_override TEXT`,
+    ],
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;

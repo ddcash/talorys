@@ -15,6 +15,8 @@ import { PushSubscriptionRepository } from "../push/repository";
 import { PushService } from "../push/service";
 import { RemoteTokenService } from "../remote/tokens";
 import { McpRepository } from "../db/repositories/mcp";
+import { RulesRepository } from "../db/repositories/rules";
+import { SkillsRepository } from "../db/repositories/skills";
 
 /** All data services for the single owner, bound to one Durable Object's storage. */
 export interface Services {
@@ -36,6 +38,8 @@ export interface Services {
   push: PushService;
   remote: RemoteTokenService;
   mcp: McpRepository;
+  rules: RulesRepository;
+  skills: SkillsRepository;
 }
 
 /** `background` keeps work alive after the request or alarm that started it (the Durable Object's waitUntil). */
@@ -80,5 +84,7 @@ export function createServices(
     push,
     remote: new RemoteTokenService(db, settings, env.SESSION_SECRET),
     mcp: new McpRepository(db),
+    rules: new RulesRepository(db),
+    skills: new SkillsRepository(db),
   };
 }

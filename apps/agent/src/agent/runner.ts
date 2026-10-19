@@ -63,9 +63,19 @@ function withApprovalOutcomes(m: ChatMessage): ChatMessage {
 export class AgentRunner {
   constructor(
     private readonly services: Services,
-    private readonly provider: AIProvider | null,
+    private readonly providerOrFactory: AIProvider | ((override?: { provider?: string | null; model?: string | null }) => AIProvider | null) | null,
     private readonly ext?: RunnerExtensions,
   ) {}
+
+  private resolveProvider(conversation?: { provider_override?: string | null; model_override?: string | null } | null): AIProvider | null {
+    if (typeof this.providerOrFactory === "function") {
+      return this.providerOrFactory({
+        provider: conversation?.provider_override,
+        model: conversation?.model_override,
+      });
+    }
+    return this.providerOrFactory;
+  }
 
   async *chat(input: TurnInput): AsyncGenerator<ChatStreamEvent> {
     const s = this.services;
@@ -109,8 +119,9 @@ export class AgentRunner {
       });
 
     try {
-      if (!this.provider) {
-        throw new AppError("AI_UNAVAILABLE", "Workers AI is not configured for this deployment. Everything else keeps working.");
+      const provider = this.resolveProvider(conversation);
+      if (!provider) {
+        throw new AppError("AI_UNAVAILABLE", "AI provider is not configured for this deployment. Everything else keeps working.");
       }
       if (!s.usage.canUseAi(limits)) throw aiLimitReached(limits.maxAiRequestsPerDay);
 
@@ -118,6 +129,20 @@ export class AgentRunner {
       const selected = this.ext ? await this.ext.selectMemories(userMessage.content) : selectRelevantMemories(s.memories, userMessage.content);
       const memories = s.memoryHistory.promptMemories(selected, memoryTokenBudget(limits));
       const items = this.ext?.selectItems ? await this.ext.selectItems(userMessage.content) : undefined;
+
+      // Active Rules
+      const activeRules = s.rules.listActive().map((r) => ({
+        title: r.title,
+        content: r.content,
+        category: r.category,
+      }));
+
+      // Active Skills
+      const activeSkills = s.skills.listActive();
+      const skillsPrompt = activeSkills.map((sk) => ({
+        name: sk.name,
+        instructions: sk.instructions,
+      }));
 
       // Recall context from external MCP memory provider (e.g. Inkstone Knowledge Base)
       let mcpMemoryContext: string | null = null;
@@ -140,6 +165,8 @@ export class AgentRunner {
         autoMemory: settings.autoMemory,
         memories,
         conversationSummary: summary,
+        rules: activeRules,
+        skills: skillsPrompt,
         ...(combinedItems ? { items: combinedItems } : {}),
       });
       const historyBudget = Math.max(500, limits.maxContextTokens - estimateTokens(baseSystem) - 600);
@@ -149,7 +176,7 @@ export class AgentRunner {
       if (window.overflow.length >= SUMMARIZE_THRESHOLD && s.usage.remainingAi(limits) >= 2) {
         try {
           s.usage.increment({ ai_requests: 1 });
-          const result = await this.provider.generate({
+          const result = await provider.generate({
             system: "You write compact, factual conversation summaries.",
             messages: summarizationPrompt(summary, window.overflow),
             maxOutputTokens: 300,
@@ -177,6 +204,8 @@ export class AgentRunner {
             autoMemory: settings.autoMemory,
             memories,
             conversationSummary: summary,
+            rules: activeRules,
+            skills: skillsPrompt,
             ...(combinedItems ? { items: combinedItems } : {}),
           });
 
@@ -193,7 +222,7 @@ export class AgentRunner {
 
       // Memory selection and summarizing may have spent budget since the first check.
       if (!s.usage.reserveAi(limits)) throw aiLimitReached(limits.maxAiRequestsPerDay);
-      for await (const event of this.provider.generateWithTools({
+      for await (const event of provider.generateWithTools({
         system,
         messages: window.messages,
         tools: providerTools,
@@ -256,7 +285,8 @@ export class AgentRunner {
   async runScheduledPrompt(prompt: string, signal?: AbortSignal): Promise<string> {
     const s = this.services;
     const settings = s.settings.get();
-    if (!this.provider) throw new AppError("AI_UNAVAILABLE", "Workers AI is not configured.");
+    const provider = this.resolveProvider(null);
+    if (!provider) throw new AppError("AI_UNAVAILABLE", "AI provider is not configured.");
     const executor = new ToolExecutor(
       this.ext?.tools ?? ALL_TOOLS,
       { services: s, timezone: settings.timezone, mode: "scheduled" },
@@ -271,6 +301,8 @@ export class AgentRunner {
         this.ext ? await this.ext.selectMemories(prompt) : selectRelevantMemories(s.memories, prompt),
         memoryTokenBudget(settings.limits),
       ),
+      rules: s.rules.listActive().map((r) => ({ title: r.title, content: r.content, category: r.category })),
+      skills: s.skills.listActive().map((sk) => ({ name: sk.name, instructions: sk.instructions })),
       scheduled: true,
     });
     const providerTools = toProviderTools(executor);
@@ -278,7 +310,7 @@ export class AgentRunner {
     // Reserved after the awaits above, so a run started just before the budget ran out cannot overrun it.
     if (!s.usage.reserveScheduledAi(settings.limits)) throw aiLimitReached(settings.limits.maxAiRequestsPerDay);
     try {
-      for await (const event of this.provider.generateWithTools({
+      for await (const event of provider.generateWithTools({
         system,
         messages: [{ role: "user", content: prompt }],
         tools: providerTools,

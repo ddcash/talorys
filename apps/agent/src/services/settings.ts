@@ -7,6 +7,7 @@ export const DEFAULT_SETTINGS: Settings = {
   agentName: "Talorys",
   timezone: "UTC",
   theme: "system",
+  provider: "workers-ai",
   model: DEFAULT_MODEL,
   temperature: 0.4,
   limits: { ...DEFAULT_LIMITS },
@@ -14,6 +15,7 @@ export const DEFAULT_SETTINGS: Settings = {
   demoMode: false,
   memoryHistory: { ...DEFAULT_MEMORY_HISTORY },
   updateCheck: true,
+  externalKeys: {},
 };
 
 const SETTINGS_KEY = "app.settings";
@@ -34,6 +36,7 @@ export class SettingsService {
       ...stored,
       limits: { ...DEFAULT_SETTINGS.limits, ...(stored.limits ?? {}) },
       memoryHistory: { ...DEFAULT_SETTINGS.memoryHistory, ...(stored.memoryHistory ?? {}) },
+      externalKeys: { ...DEFAULT_SETTINGS.externalKeys, ...(stored.externalKeys ?? {}) },
     };
     const parsed = settingsSchema.safeParse(merged);
     if (parsed.success) return parsed.data;
@@ -51,9 +54,10 @@ export class SettingsService {
       ...stripUndefined(parsedPatch.data),
       limits: { ...current.limits, ...stripUndefined(parsedPatch.data.limits ?? {}) },
       memoryHistory: { ...current.memoryHistory, ...stripUndefined(parsedPatch.data.memoryHistory ?? {}) },
+      externalKeys: { ...current.externalKeys, ...stripUndefined(parsedPatch.data.externalKeys ?? {}) },
     };
     const parsed = settingsSchema.safeParse(next);
-    if (!parsed.success) throw ValidationError.fromZod(parsed.error);
+    if (!parsed.success) throw ValidationError.fromZod(parsedPatch.error ?? parsed.error);
     this.setJson(SETTINGS_KEY, parsed.data);
     return parsed.data;
   }

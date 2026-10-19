@@ -44,6 +44,8 @@ export interface PromptContext {
   scheduled?: boolean;
   /** The finished section of tasks, notes and automations that may relate to the message; none when unset or empty. */
   items?: string;
+  rules?: { title: string; content: string; category: string }[];
+  skills?: { name: string; instructions: string }[];
 }
 
 export function buildSystemPrompt(ctx: PromptContext): string {
@@ -57,6 +59,17 @@ export function buildSystemPrompt(ctx: PromptContext): string {
     `${SAFETY_RULES}\n${ctx.autoMemory ? AUTO_MEMORY_RULE : EXPLICIT_MEMORY_RULE}`,
     `Current time for the owner: ${localNow} (${ctx.timezone}).`,
   ];
+
+  if (ctx.rules && ctx.rules.length > 0) {
+    const rulesText = ctx.rules.map((r) => `### ${r.title} (${r.category})\n${r.content}`).join("\n\n");
+    sections.push(`## Custom Behavioral Rules & Guidelines\n${rulesText}`);
+  }
+
+  if (ctx.skills && ctx.skills.length > 0) {
+    const skillsText = ctx.skills.map((s) => `### Skill: ${s.name}\n${s.instructions}`).join("\n\n");
+    sections.push(`## Active Skills & Capabilities\n${skillsText}`);
+  }
+
   const line = (m: PromptContext["memories"][number]) => `- [${m.category}] ${m.content}${m.note ? ` (${m.note})` : ""}`;
   const current = ctx.memories.filter((m) => !m.status || m.status === "active");
   const uncertain = ctx.memories.filter((m) => m.status === "uncertain");

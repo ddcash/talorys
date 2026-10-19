@@ -100,6 +100,8 @@ export interface Conversation {
   created_at: string;
   updated_at: string;
   message_count?: number;
+  provider_override?: LLMProviderId | null;
+  model_override?: string | null;
 }
 
 export type PendingActionStatus = "pending" | "approved" | "cancelled" | "expired" | "failed";
@@ -253,6 +255,89 @@ export const mcpTestSchema = z.object({
   auth_token: z.string().max(1000).nullable().optional(),
 });
 
+// ---------- LLM Providers ----------
+
+export const llmProviderSchema = z.enum(["workers-ai", "anthropic", "openai", "openrouter", "gemini"]);
+export type LLMProviderId = z.infer<typeof llmProviderSchema>;
+
+export const externalKeysSchema = z.object({
+  anthropic: z.string().optional(),
+  openai: z.string().optional(),
+  openrouter: z.string().optional(),
+  gemini: z.string().optional(),
+  cloudflareToken: z.string().optional(),
+  cloudflareAccountId: z.string().optional(),
+}).partial();
+export type ExternalKeys = z.infer<typeof externalKeysSchema>;
+
+export const conversationUpdateSchema = z.object({
+  title: shortText(120).optional(),
+  provider_override: llmProviderSchema.nullable().optional(),
+  model_override: z.string().max(120).nullable().optional(),
+});
+
+// ---------- Rules ----------
+
+export const ruleCategorySchema = z.enum(["general", "persona", "coding", "writing", "memory", "safety"]);
+export type RuleCategory = z.infer<typeof ruleCategorySchema>;
+
+export interface Rule {
+  id: string;
+  title: string;
+  content: string;
+  category: RuleCategory;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export const ruleCreateSchema = z.object({
+  title: shortText(150),
+  content: z.string().min(1).max(5000),
+  category: ruleCategorySchema.default("general"),
+  enabled: z.boolean().optional().default(true),
+});
+
+export const ruleUpdateSchema = ruleCreateSchema.partial();
+
+// ---------- Skills ----------
+
+export const skillCategorySchema = z.enum([
+  "general",
+  "productivity",
+  "coding",
+  "research",
+  "analysis",
+  "creativity",
+  "data",
+  "writing",
+  "automation",
+]);
+export type SkillCategory = z.infer<typeof skillCategorySchema>;
+
+export interface Skill {
+  id: string;
+  name: string;
+  description: string;
+  instructions: string;
+  tools_json: string;
+  category: SkillCategory;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export const skillCreateSchema = z.object({
+  name: shortText(100),
+  description: shortText(300),
+  instructions: z.string().min(1).max(10000),
+  tools_json: z.string().optional().default("[]"),
+  category: skillCategorySchema.default("general"),
+  enabled: z.boolean().optional().default(true),
+});
+
+export const skillUpdateSchema = skillCreateSchema.partial();
+
 // ---------- Input schemas ----------
 
 export const taskCreateSchema = z.object({
@@ -318,7 +403,6 @@ export const projectUpdateSchema = z
   .partial();
 
 export const conversationCreateSchema = z.object({ title: z.string().trim().max(200).optional() });
-export const conversationUpdateSchema = z.object({ title: shortText(200) });
 
 export const chatRequestSchema = z.object({
   conversation_id: id.optional(),
@@ -364,7 +448,8 @@ export const settingsSchema = z.object({
   agentName: shortText(60),
   timezone: z.string().refine(isValidTimeZone, "Unknown IANA timezone"),
   theme: z.enum(["system", "light", "dark"]),
-  model: z.string().regex(/^@(cf|hf)\/[\w.\-/]+$/, "Must be a Workers AI model id"),
+  provider: llmProviderSchema.default("workers-ai"),
+  model: z.string().min(1).max(120),
   temperature: z.number().min(0).max(1.5),
   limits: limitsSchema,
   autoMemory: z.boolean(),
@@ -373,12 +458,17 @@ export const settingsSchema = z.object({
   memoryHistory: memoryHistorySettingsSchema,
   /** Check the npm registry once a day for a newer Talorys release. */
   updateCheck: z.boolean(),
+  externalKeys: externalKeysSchema.default({}),
 });
 export type Settings = z.infer<typeof settingsSchema>;
 export const settingsUpdateSchema = settingsSchema
-  .omit({ limits: true, memoryHistory: true })
+  .omit({ limits: true, memoryHistory: true, externalKeys: true })
   .partial()
-  .extend({ limits: limitsSchema.partial().optional(), memoryHistory: memoryHistorySettingsSchema.partial().optional() });
+  .extend({
+    limits: limitsSchema.partial().optional(),
+    memoryHistory: memoryHistorySettingsSchema.partial().optional(),
+    externalKeys: externalKeysSchema.partial().optional(),
+  });
 
 export const loginSchema = z.object({ password: z.string().min(1).max(256) });
 export const changePasswordSchema = z.object({

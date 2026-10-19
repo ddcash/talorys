@@ -14,6 +14,9 @@ import { pushRoutes } from "../push/routes";
 import { remoteAuth } from "../remote/middleware";
 import { remoteRoutes } from "../remote/routes";
 import { mcpRoutes } from "./routes/mcp";
+import { rulesRoutes } from "./routes/rules";
+import { skillsRoutes } from "./routes/skills";
+import { modelsRoutes } from "./routes/models";
 
 export interface AppEnv {
   Bindings: { agent: TalorysAgent; env: Env };
@@ -50,6 +53,9 @@ export function createApi() {
   app.route("/", pushRoutes);
   app.route("/", remoteRoutes);
   app.route("/mcp", mcpRoutes);
+  app.route("/", rulesRoutes);
+  app.route("/", skillsRoutes);
+  app.route("/", modelsRoutes);
 
   return app;
 }

@@ -62171,6 +62171,48 @@ var mcpTestSchema = external_exports.object({
   url: external_exports.string().url("Must be a valid URL"),
   auth_token: external_exports.string().max(1e3).nullable().optional()
 });
+var llmProviderSchema = external_exports.enum(["workers-ai", "anthropic", "openai", "openrouter", "gemini"]);
+var externalKeysSchema = external_exports.object({
+  anthropic: external_exports.string().optional(),
+  openai: external_exports.string().optional(),
+  openrouter: external_exports.string().optional(),
+  gemini: external_exports.string().optional(),
+  cloudflareToken: external_exports.string().optional(),
+  cloudflareAccountId: external_exports.string().optional()
+}).partial();
+var conversationUpdateSchema = external_exports.object({
+  title: shortText(120).optional(),
+  provider_override: llmProviderSchema.nullable().optional(),
+  model_override: external_exports.string().max(120).nullable().optional()
+});
+var ruleCategorySchema = external_exports.enum(["general", "persona", "coding", "writing", "memory", "safety"]);
+var ruleCreateSchema = external_exports.object({
+  title: shortText(150),
+  content: external_exports.string().min(1).max(5e3),
+  category: ruleCategorySchema.default("general"),
+  enabled: external_exports.boolean().optional().default(true)
+});
+var ruleUpdateSchema = ruleCreateSchema.partial();
+var skillCategorySchema = external_exports.enum([
+  "general",
+  "productivity",
+  "coding",
+  "research",
+  "analysis",
+  "creativity",
+  "data",
+  "writing",
+  "automation"
+]);
+var skillCreateSchema = external_exports.object({
+  name: shortText(100),
+  description: shortText(300),
+  instructions: external_exports.string().min(1).max(1e4),
+  tools_json: external_exports.string().optional().default("[]"),
+  category: skillCategorySchema.default("general"),
+  enabled: external_exports.boolean().optional().default(true)
+});
+var skillUpdateSchema = skillCreateSchema.partial();
 var taskCreateSchema = external_exports.object({
   title: shortText(300),
   description: external_exports.string().max(1e4).optional().default(""),
@@ -62220,7 +62262,6 @@ var projectCreateSchema = external_exports.object({
 });
 var projectUpdateSchema = external_exports.object({ name: shortText(200), description: external_exports.string().max(5e3), status: external_exports.enum(PROJECT_STATUSES) }).partial();
 var conversationCreateSchema = external_exports.object({ title: external_exports.string().trim().max(200).optional() });
-var conversationUpdateSchema = external_exports.object({ title: shortText(200) });
 var chatRequestSchema = external_exports.object({
   conversation_id: id.optional(),
   message: shortText(16e3),
@@ -62257,7 +62298,8 @@ var settingsSchema = external_exports.object({
   agentName: shortText(60),
   timezone: external_exports.string().refine(isValidTimeZone, "Unknown IANA timezone"),
   theme: external_exports.enum(["system", "light", "dark"]),
-  model: external_exports.string().regex(/^@(cf|hf)\/[\w.\-/]+$/, "Must be a Workers AI model id"),
+  provider: llmProviderSchema.default("workers-ai"),
+  model: external_exports.string().min(1).max(120),
   temperature: external_exports.number().min(0).max(1.5),
   limits: limitsSchema,
   autoMemory: external_exports.boolean(),
@@ -62265,9 +62307,14 @@ var settingsSchema = external_exports.object({
   demoMode: external_exports.boolean(),
   memoryHistory: memoryHistorySettingsSchema,
   /** Check the npm registry once a day for a newer Talorys release. */
-  updateCheck: external_exports.boolean()
+  updateCheck: external_exports.boolean(),
+  externalKeys: externalKeysSchema.default({})
 });
-var settingsUpdateSchema = settingsSchema.omit({ limits: true, memoryHistory: true }).partial().extend({ limits: limitsSchema.partial().optional(), memoryHistory: memoryHistorySettingsSchema.partial().optional() });
+var settingsUpdateSchema = settingsSchema.omit({ limits: true, memoryHistory: true, externalKeys: true }).partial().extend({
+  limits: limitsSchema.partial().optional(),
+  memoryHistory: memoryHistorySettingsSchema.partial().optional(),
+  externalKeys: externalKeysSchema.partial().optional()
+});
 var loginSchema = external_exports.object({ password: external_exports.string().min(1).max(256) });
 var changePasswordSchema = external_exports.object({
   current_password: external_exports.string().min(1).max(256),
@@ -62754,6 +62801,36 @@ var MIGRATIONS = [
         updated_at TEXT NOT NULL
       )`,
       `CREATE INDEX IF NOT EXISTS tal_mcp_servers_enabled ON tal_mcp_servers(enabled)`
+    ]
+  },
+  {
+    version: 12,
+    name: "rules, skills, and multi-model conversation overrides",
+    statements: [
+      `CREATE TABLE IF NOT EXISTS tal_rules (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT 'general',
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )`,
+      `CREATE INDEX IF NOT EXISTS tal_rules_enabled ON tal_rules(enabled)`,
+      `CREATE TABLE IF NOT EXISTS tal_skills (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT NOT NULL,
+        instructions TEXT NOT NULL,
+        tools_json TEXT NOT NULL DEFAULT '[]',
+        category TEXT NOT NULL DEFAULT 'general',
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )`,
+      `CREATE INDEX IF NOT EXISTS tal_skills_enabled ON tal_skills(enabled)`,
+      `ALTER TABLE tal_conversations ADD COLUMN provider_override TEXT`,
+      `ALTER TABLE tal_conversations ADD COLUMN model_override TEXT`
     ]
   }
 ];
@@ -63441,7 +63518,7 @@ var ConversationRepository = class {
     if (opts.q) {
       const pattern = likePattern(opts.q);
       return this.db.all(
-        `SELECT c.id, c.title, c.created_at, c.updated_at,
+        `SELECT c.id, c.title, c.created_at, c.updated_at, c.provider_override, c.model_override,
            (SELECT count(*) FROM tal_messages m WHERE m.conversation_id = c.id) AS message_count
          FROM tal_conversations c
          WHERE c.title LIKE ? ESCAPE '\\'
@@ -63453,7 +63530,7 @@ var ConversationRepository = class {
       );
     }
     return this.db.all(
-      `SELECT c.id, c.title, c.created_at, c.updated_at,
+      `SELECT c.id, c.title, c.created_at, c.updated_at, c.provider_override, c.model_override,
          (SELECT count(*) FROM tal_messages m WHERE m.conversation_id = c.id) AS message_count
        FROM tal_conversations c ORDER BY c.updated_at DESC LIMIT ?`,
       opts.limit ?? 200
@@ -63469,7 +63546,7 @@ var ConversationRepository = class {
   }
   create(title = "New conversation") {
     const ts = now();
-    const c = { id: newId(), title, created_at: ts, updated_at: ts, summary: null, summary_upto: null };
+    const c = { id: newId(), title, created_at: ts, updated_at: ts, summary: null, summary_upto: null, provider_override: null, model_override: null };
     this.db.run(
       `INSERT INTO tal_conversations (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)`,
       c.id,
@@ -63482,6 +63559,21 @@ var ConversationRepository = class {
   rename(id2, title) {
     this.require(id2);
     this.db.run(`UPDATE tal_conversations SET title = ?, updated_at = ? WHERE id = ?`, title, now(), id2);
+    return this.require(id2);
+  }
+  updateOverrides(id2, patch) {
+    const current = this.require(id2);
+    const provider = patch.provider_override !== void 0 ? patch.provider_override : current.provider_override;
+    const model = patch.model_override !== void 0 ? patch.model_override : current.model_override;
+    const title = patch.title ?? current.title;
+    this.db.run(
+      `UPDATE tal_conversations SET title = ?, provider_override = ?, model_override = ?, updated_at = ? WHERE id = ?`,
+      title,
+      provider,
+      model,
+      now(),
+      id2
+    );
     return this.require(id2);
   }
   touch(id2) {
@@ -63831,13 +63923,15 @@ var DEFAULT_SETTINGS = {
   agentName: "Talorys",
   timezone: "UTC",
   theme: "system",
+  provider: "workers-ai",
   model: DEFAULT_MODEL,
   temperature: 0.4,
   limits: { ...DEFAULT_LIMITS2 },
   autoMemory: true,
   demoMode: false,
   memoryHistory: { ...DEFAULT_MEMORY_HISTORY },
-  updateCheck: true
+  updateCheck: true,
+  externalKeys: {}
 };
 var SETTINGS_KEY = "app.settings";
 var SettingsService = class {
@@ -63857,7 +63951,8 @@ var SettingsService = class {
       ...this.defaults,
       ...stored,
       limits: { ...DEFAULT_SETTINGS.limits, ...stored.limits ?? {} },
-      memoryHistory: { ...DEFAULT_SETTINGS.memoryHistory, ...stored.memoryHistory ?? {} }
+      memoryHistory: { ...DEFAULT_SETTINGS.memoryHistory, ...stored.memoryHistory ?? {} },
+      externalKeys: { ...DEFAULT_SETTINGS.externalKeys, ...stored.externalKeys ?? {} }
     };
     const parsed = settingsSchema.safeParse(merged);
     if (parsed.success) return parsed.data;
@@ -63872,10 +63967,11 @@ var SettingsService = class {
       ...current,
       ...stripUndefined2(parsedPatch.data),
       limits: { ...current.limits, ...stripUndefined2(parsedPatch.data.limits ?? {}) },
-      memoryHistory: { ...current.memoryHistory, ...stripUndefined2(parsedPatch.data.memoryHistory ?? {}) }
+      memoryHistory: { ...current.memoryHistory, ...stripUndefined2(parsedPatch.data.memoryHistory ?? {}) },
+      externalKeys: { ...current.externalKeys, ...stripUndefined2(parsedPatch.data.externalKeys ?? {}) }
     };
     const parsed = settingsSchema.safeParse(next);
-    if (!parsed.success) throw ValidationError.fromZod(parsed.error);
+    if (!parsed.success) throw ValidationError.fromZod(parsedPatch.error ?? parsed.error);
     this.setJson(SETTINGS_KEY, parsed.data);
     return parsed.data;
   }
@@ -66132,6 +66228,203 @@ var McpRepository = class {
   }
 };
 
+// src/db/repositories/rules.ts
+function rowToRule(r2) {
+  return {
+    id: r2.id,
+    title: r2.title,
+    content: r2.content,
+    category: r2.category,
+    enabled: Boolean(r2.enabled),
+    created_at: r2.created_at,
+    updated_at: r2.updated_at
+  };
+}
+__name(rowToRule, "rowToRule");
+var RulesRepository = class {
+  constructor(db) {
+    this.db = db;
+  }
+  db;
+  static {
+    __name(this, "RulesRepository");
+  }
+  list() {
+    const rows = this.db.all("SELECT * FROM tal_rules ORDER BY created_at ASC");
+    return rows.map(rowToRule);
+  }
+  listActive() {
+    const rows = this.db.all("SELECT * FROM tal_rules WHERE enabled = 1 ORDER BY category ASC, created_at ASC");
+    return rows.map(rowToRule);
+  }
+  get(id2) {
+    const row = this.db.one("SELECT * FROM tal_rules WHERE id = ?", id2);
+    return row ? rowToRule(row) : null;
+  }
+  create(data) {
+    const id2 = newId();
+    const timestamp = now();
+    const category = data.category ?? "general";
+    const enabled = data.enabled !== false ? 1 : 0;
+    this.db.run(
+      `INSERT INTO tal_rules (id, title, content, category, enabled, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      id2,
+      data.title,
+      data.content,
+      category,
+      enabled,
+      timestamp,
+      timestamp
+    );
+    return {
+      id: id2,
+      title: data.title,
+      content: data.content,
+      category,
+      enabled: Boolean(enabled),
+      created_at: timestamp,
+      updated_at: timestamp
+    };
+  }
+  update(id2, patch) {
+    const current = this.get(id2);
+    if (!current) throw new NotFoundError("Rule not found");
+    const title = patch.title ?? current.title;
+    const content = patch.content ?? current.content;
+    const category = patch.category ?? current.category;
+    const enabled = patch.enabled !== void 0 ? patch.enabled ? 1 : 0 : current.enabled ? 1 : 0;
+    const timestamp = now();
+    this.db.run(
+      `UPDATE tal_rules SET title = ?, content = ?, category = ?, enabled = ?, updated_at = ? WHERE id = ?`,
+      title,
+      content,
+      category,
+      enabled,
+      timestamp,
+      id2
+    );
+    return {
+      id: id2,
+      title,
+      content,
+      category,
+      enabled: Boolean(enabled),
+      created_at: current.created_at,
+      updated_at: timestamp
+    };
+  }
+  delete(id2) {
+    const res = this.db.run("DELETE FROM tal_rules WHERE id = ?", id2);
+    if (res.changes === 0) throw new NotFoundError("Rule not found");
+  }
+};
+
+// src/db/repositories/skills.ts
+function rowToSkill(r2) {
+  return {
+    id: r2.id,
+    name: r2.name,
+    description: r2.description,
+    instructions: r2.instructions,
+    tools_json: r2.tools_json || "[]",
+    category: r2.category,
+    enabled: Boolean(r2.enabled),
+    created_at: r2.created_at,
+    updated_at: r2.updated_at
+  };
+}
+__name(rowToSkill, "rowToSkill");
+var SkillsRepository = class {
+  constructor(db) {
+    this.db = db;
+  }
+  db;
+  static {
+    __name(this, "SkillsRepository");
+  }
+  list() {
+    const rows = this.db.all("SELECT * FROM tal_skills ORDER BY created_at ASC");
+    return rows.map(rowToSkill);
+  }
+  listActive() {
+    const rows = this.db.all("SELECT * FROM tal_skills WHERE enabled = 1 ORDER BY category ASC, created_at ASC");
+    return rows.map(rowToSkill);
+  }
+  get(id2) {
+    const row = this.db.one("SELECT * FROM tal_skills WHERE id = ?", id2);
+    return row ? rowToSkill(row) : null;
+  }
+  create(data) {
+    const id2 = newId();
+    const timestamp = now();
+    const category = data.category ?? "general";
+    const tools_json = data.tools_json ?? "[]";
+    const enabled = data.enabled !== false ? 1 : 0;
+    this.db.run(
+      `INSERT INTO tal_skills (id, name, description, instructions, tools_json, category, enabled, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      id2,
+      data.name,
+      data.description,
+      data.instructions,
+      tools_json,
+      category,
+      enabled,
+      timestamp,
+      timestamp
+    );
+    return {
+      id: id2,
+      name: data.name,
+      description: data.description,
+      instructions: data.instructions,
+      tools_json,
+      category,
+      enabled: Boolean(enabled),
+      created_at: timestamp,
+      updated_at: timestamp
+    };
+  }
+  update(id2, patch) {
+    const current = this.get(id2);
+    if (!current) throw new NotFoundError("Skill not found");
+    const name5 = patch.name ?? current.name;
+    const description = patch.description ?? current.description;
+    const instructions = patch.instructions ?? current.instructions;
+    const tools_json = patch.tools_json ?? current.tools_json;
+    const category = patch.category ?? current.category;
+    const enabled = patch.enabled !== void 0 ? patch.enabled ? 1 : 0 : current.enabled ? 1 : 0;
+    const timestamp = now();
+    this.db.run(
+      `UPDATE tal_skills SET name = ?, description = ?, instructions = ?, tools_json = ?, category = ?, enabled = ?, updated_at = ? WHERE id = ?`,
+      name5,
+      description,
+      instructions,
+      tools_json,
+      category,
+      enabled,
+      timestamp,
+      id2
+    );
+    return {
+      id: id2,
+      name: name5,
+      description,
+      instructions,
+      tools_json,
+      category,
+      enabled: Boolean(enabled),
+      created_at: current.created_at,
+      updated_at: timestamp
+    };
+  }
+  delete(id2) {
+    const res = this.db.run("DELETE FROM tal_skills WHERE id = ?", id2);
+    if (res.changes === 0) throw new NotFoundError("Skill not found");
+  }
+};
+
 // src/services/container.ts
 function createServices(storage, env, scheduler, memoryHooks = {}, background = () => {
 }) {
@@ -66168,7 +66461,9 @@ function createServices(storage, env, scheduler, memoryHooks = {}, background = 
     memoryHistory: new MemoryHistoryService(db, memories, settings, usage, activity, memoryHooks),
     push,
     remote: new RemoteTokenService(db, settings, env.SESSION_SECRET),
-    mcp: new McpRepository(db)
+    mcp: new McpRepository(db),
+    rules: new RulesRepository(db),
+    skills: new SkillsRepository(db)
   };
 }
 __name(createServices, "createServices");
@@ -66917,6 +67212,18 @@ function buildSystemPrompt(ctx) {
 ${ctx.autoMemory ? AUTO_MEMORY_RULE : EXPLICIT_MEMORY_RULE}`,
     `Current time for the owner: ${localNow} (${ctx.timezone}).`
   ];
+  if (ctx.rules && ctx.rules.length > 0) {
+    const rulesText = ctx.rules.map((r2) => `### ${r2.title} (${r2.category})
+${r2.content}`).join("\n\n");
+    sections.push(`## Custom Behavioral Rules & Guidelines
+${rulesText}`);
+  }
+  if (ctx.skills && ctx.skills.length > 0) {
+    const skillsText = ctx.skills.map((s2) => `### Skill: ${s2.name}
+${s2.instructions}`).join("\n\n");
+    sections.push(`## Active Skills & Capabilities
+${skillsText}`);
+  }
   const line = /* @__PURE__ */ __name((m) => `- [${m.category}] ${m.content}${m.note ? ` (${m.note})` : ""}`, "line");
   const current = ctx.memories.filter((m) => !m.status || m.status === "active");
   const uncertain = ctx.memories.filter((m) => m.status === "uncertain");
@@ -67346,16 +67653,25 @@ ${notes.join("\n")}`.trim() } : m;
 }
 __name(withApprovalOutcomes, "withApprovalOutcomes");
 var AgentRunner = class {
-  constructor(services, provider, ext) {
+  constructor(services, providerOrFactory, ext) {
     this.services = services;
-    this.provider = provider;
+    this.providerOrFactory = providerOrFactory;
     this.ext = ext;
   }
   services;
-  provider;
+  providerOrFactory;
   ext;
   static {
     __name(this, "AgentRunner");
+  }
+  resolveProvider(conversation) {
+    if (typeof this.providerOrFactory === "function") {
+      return this.providerOrFactory({
+        provider: conversation?.provider_override,
+        model: conversation?.model_override
+      });
+    }
+    return this.providerOrFactory;
   }
   async *chat(input2) {
     const s2 = this.services;
@@ -67392,13 +67708,24 @@ var AgentRunner = class {
       error: error62
     }), "finish");
     try {
-      if (!this.provider) {
-        throw new AppError("AI_UNAVAILABLE", "Workers AI is not configured for this deployment. Everything else keeps working.");
+      const provider = this.resolveProvider(conversation);
+      if (!provider) {
+        throw new AppError("AI_UNAVAILABLE", "AI provider is not configured for this deployment. Everything else keeps working.");
       }
       if (!s2.usage.canUseAi(limits)) throw aiLimitReached(limits.maxAiRequestsPerDay);
       const selected = this.ext ? await this.ext.selectMemories(userMessage.content) : selectRelevantMemories(s2.memories, userMessage.content);
       const memories = s2.memoryHistory.promptMemories(selected, memoryTokenBudget(limits));
       const items = this.ext?.selectItems ? await this.ext.selectItems(userMessage.content) : void 0;
+      const activeRules = s2.rules.listActive().map((r2) => ({
+        title: r2.title,
+        content: r2.content,
+        category: r2.category
+      }));
+      const activeSkills = s2.skills.listActive();
+      const skillsPrompt = activeSkills.map((sk) => ({
+        name: sk.name,
+        instructions: sk.instructions
+      }));
       let mcpMemoryContext = null;
       const memoryServer = s2.mcp.getMemoryProvider();
       if (memoryServer) {
@@ -67415,6 +67742,8 @@ var AgentRunner = class {
         autoMemory: settings.autoMemory,
         memories,
         conversationSummary: summary,
+        rules: activeRules,
+        skills: skillsPrompt,
         ...combinedItems ? { items: combinedItems } : {}
       });
       const historyBudget = Math.max(500, limits.maxContextTokens - estimateTokens(baseSystem) - 600);
@@ -67422,7 +67751,7 @@ var AgentRunner = class {
       if (window2.overflow.length >= SUMMARIZE_THRESHOLD && s2.usage.remainingAi(limits) >= 2) {
         try {
           s2.usage.increment({ ai_requests: 1 });
-          const result = await this.provider.generate({
+          const result = await provider.generate({
             system: "You write compact, factual conversation summaries.",
             messages: summarizationPrompt(summary, window2.overflow),
             maxOutputTokens: 300,
@@ -67447,6 +67776,8 @@ var AgentRunner = class {
         autoMemory: settings.autoMemory,
         memories,
         conversationSummary: summary,
+        rules: activeRules,
+        skills: skillsPrompt,
         ...combinedItems ? { items: combinedItems } : {}
       });
       const enabledMcp = s2.mcp.listEnabled();
@@ -67459,7 +67790,7 @@ var AgentRunner = class {
       );
       const providerTools = toProviderTools(executor);
       if (!s2.usage.reserveAi(limits)) throw aiLimitReached(limits.maxAiRequestsPerDay);
-      for await (const event of this.provider.generateWithTools({
+      for await (const event of provider.generateWithTools({
         system,
         messages: window2.messages,
         tools: providerTools,
@@ -67519,7 +67850,8 @@ var AgentRunner = class {
   async runScheduledPrompt(prompt, signal) {
     const s2 = this.services;
     const settings = s2.settings.get();
-    if (!this.provider) throw new AppError("AI_UNAVAILABLE", "Workers AI is not configured.");
+    const provider = this.resolveProvider(null);
+    if (!provider) throw new AppError("AI_UNAVAILABLE", "AI provider is not configured.");
     const executor = new ToolExecutor(
       this.ext?.tools ?? ALL_TOOLS,
       { services: s2, timezone: settings.timezone, mode: "scheduled" },
@@ -67534,13 +67866,15 @@ var AgentRunner = class {
         this.ext ? await this.ext.selectMemories(prompt) : selectRelevantMemories(s2.memories, prompt),
         memoryTokenBudget(settings.limits)
       ),
+      rules: s2.rules.listActive().map((r2) => ({ title: r2.title, content: r2.content, category: r2.category })),
+      skills: s2.skills.listActive().map((sk) => ({ name: sk.name, instructions: sk.instructions })),
       scheduled: true
     });
     const providerTools = toProviderTools(executor);
     let text2 = "";
     if (!s2.usage.reserveScheduledAi(settings.limits)) throw aiLimitReached(settings.limits.maxAiRequestsPerDay);
     try {
-      for await (const event of this.provider.generateWithTools({
+      for await (const event of provider.generateWithTools({
         system,
         messages: [{ role: "user", content: prompt }],
         tools: providerTools,
@@ -69596,8 +69930,8 @@ chatRoutes.get("/conversations/:id", (c) => {
   });
 });
 chatRoutes.patch("/conversations/:id", async (c) => {
-  const { title } = await body(c, conversationUpdateSchema);
-  const { summary: _s, summary_upto: _u, ...rest } = c.env.agent.services.conversations.rename(c.req.param("id"), title);
+  const patch = await body(c, conversationUpdateSchema);
+  const { summary: _s, summary_upto: _u, ...rest } = c.env.agent.services.conversations.updateOverrides(c.req.param("id"), patch);
   return c.json({ conversation: rest });
 });
 chatRoutes.delete("/conversations/:id", (c) => {
@@ -72156,6 +72490,293 @@ mcpRoutes.delete("/servers/:id", (c) => {
   return c.json({ ok: true });
 });
 
+// src/api/routes/rules.ts
+var rulesRoutes = new Hono3();
+rulesRoutes.get("/rules", (c) => {
+  const rules = c.env.agent.services.rules.list();
+  return c.json({ rules });
+});
+rulesRoutes.post("/rules", async (c) => {
+  const input2 = await body(c, ruleCreateSchema);
+  const rule = c.env.agent.services.rules.create(input2);
+  return c.json({ rule }, 201);
+});
+rulesRoutes.get("/rules/:id", (c) => {
+  const rule = c.env.agent.services.rules.get(c.req.param("id"));
+  if (!rule) return c.json({ error: "Rule not found" }, 404);
+  return c.json({ rule });
+});
+rulesRoutes.patch("/rules/:id", async (c) => {
+  const patch = await body(c, ruleUpdateSchema);
+  const rule = c.env.agent.services.rules.update(c.req.param("id"), patch);
+  return c.json({ rule });
+});
+rulesRoutes.delete("/rules/:id", (c) => {
+  c.env.agent.services.rules.delete(c.req.param("id"));
+  return c.json({ deleted: true });
+});
+
+// src/api/routes/skills.ts
+var skillsRoutes = new Hono3();
+skillsRoutes.get("/skills", (c) => {
+  const skills = c.env.agent.services.skills.list();
+  return c.json({ skills });
+});
+skillsRoutes.post("/skills", async (c) => {
+  const input2 = await body(c, skillCreateSchema);
+  const skill = c.env.agent.services.skills.create(input2);
+  return c.json({ skill }, 201);
+});
+skillsRoutes.get("/skills/:id", (c) => {
+  const skill = c.env.agent.services.skills.get(c.req.param("id"));
+  if (!skill) return c.json({ error: "Skill not found" }, 404);
+  return c.json({ skill });
+});
+skillsRoutes.patch("/skills/:id", async (c) => {
+  const patch = await body(c, skillUpdateSchema);
+  const skill = c.env.agent.services.skills.update(c.req.param("id"), patch);
+  return c.json({ skill });
+});
+skillsRoutes.delete("/skills/:id", (c) => {
+  c.env.agent.services.skills.delete(c.req.param("id"));
+  return c.json({ deleted: true });
+});
+
+// src/api/routes/models.ts
+var DEFAULT_CLOUDFLARE_MODELS = [
+  {
+    id: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+    name: "Llama 3.3 70B Instruct (FP8 Fast)",
+    description: "Meta's flagship 70B model optimized for fast inference with tool calling support.",
+    provider: "cloudflare",
+    tags: ["recommended", "tool-calling", "fast", "general"],
+    recommended: true
+  },
+  {
+    id: "@cf/meta/llama-3.1-70b-instruct",
+    name: "Llama 3.1 70B Instruct",
+    description: "High-capability open model with 128k context and function calling.",
+    provider: "cloudflare",
+    tags: ["tool-calling", "general"]
+  },
+  {
+    id: "@cf/meta/llama-3.1-8b-instruct",
+    name: "Llama 3.1 8B Instruct",
+    description: "Fast, efficient 8B model suitable for daily assistance and rapid responses.",
+    provider: "cloudflare",
+    tags: ["fast", "tool-calling"]
+  },
+  {
+    id: "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
+    name: "DeepSeek R1 Distill Qwen 32B",
+    description: "Advanced reasoning model with chain-of-thought capabilities.",
+    provider: "cloudflare",
+    tags: ["reasoning", "coding", "math"]
+  },
+  {
+    id: "@cf/meta/llama-3.2-3b-instruct",
+    name: "Llama 3.2 3B Instruct",
+    description: "Compact and ultra-low latency model for simple tasks.",
+    provider: "cloudflare",
+    tags: ["fast", "lightweight"]
+  },
+  {
+    id: "@cf/meta/llama-3.2-11b-vision-instruct",
+    name: "Llama 3.2 11B Vision Instruct",
+    description: "Multimodal text and image understanding model.",
+    provider: "cloudflare",
+    tags: ["vision", "multimodal"]
+  },
+  {
+    id: "@cf/qwen/qwen2.5-7b-instruct",
+    name: "Qwen 2.5 7B Instruct",
+    description: "Excellent multilingual and coding capabilities from Alibaba Cloud.",
+    provider: "cloudflare",
+    tags: ["coding", "multilingual"]
+  },
+  {
+    id: "@cf/mistral/mistral-7b-instruct-v0.2",
+    name: "Mistral 7B Instruct v0.2",
+    description: "Balanced general-purpose 7B model.",
+    provider: "cloudflare",
+    tags: ["general"]
+  },
+  {
+    id: "@cf/google/gemma-7b-it",
+    name: "Google Gemma 7B IT",
+    description: "Lightweight open model trained on Google technology.",
+    provider: "cloudflare",
+    tags: ["general"]
+  }
+];
+var PRESET_MODELS = {
+  cloudflare: DEFAULT_CLOUDFLARE_MODELS,
+  anthropic: [
+    {
+      id: "claude-3-7-sonnet-20250219",
+      name: "Claude 3.7 Sonnet",
+      description: "Hybrid reasoning model capable of standard chat and extended thinking.",
+      provider: "anthropic",
+      tags: ["recommended", "reasoning", "coding", "tool-calling"],
+      recommended: true
+    },
+    {
+      id: "claude-3-5-sonnet-20241022",
+      name: "Claude 3.5 Sonnet",
+      description: "Industry-leading intelligence for coding, analysis, and nuance.",
+      provider: "anthropic",
+      tags: ["coding", "analysis", "tool-calling"]
+    },
+    {
+      id: "claude-3-5-haiku-20241022",
+      name: "Claude 3.5 Haiku",
+      description: "Lightning-fast model with near Sonnet-level speed and responsiveness.",
+      provider: "anthropic",
+      tags: ["fast", "tool-calling"]
+    }
+  ],
+  openai: [
+    {
+      id: "gpt-4o",
+      name: "GPT-4o",
+      description: "OpenAI flagship omni model for multimodal understanding and complex tasks.",
+      provider: "openai",
+      tags: ["recommended", "tool-calling", "general"],
+      recommended: true
+    },
+    {
+      id: "gpt-4o-mini",
+      name: "GPT-4o Mini",
+      description: "Fast, cost-efficient model for lightweight daily tasks.",
+      provider: "openai",
+      tags: ["fast", "tool-calling"]
+    },
+    {
+      id: "o3-mini",
+      name: "o3-mini",
+      description: "High-speed reasoning model specialized in STEM, coding, and math.",
+      provider: "openai",
+      tags: ["reasoning", "coding", "math"]
+    }
+  ],
+  openrouter: [
+    {
+      id: "anthropic/claude-3.7-sonnet",
+      name: "Claude 3.7 Sonnet (via OpenRouter)",
+      description: "Access Anthropic Claude 3.7 Sonnet via OpenRouter gateway.",
+      provider: "openrouter",
+      tags: ["recommended", "reasoning", "coding"],
+      recommended: true
+    },
+    {
+      id: "openai/gpt-4o",
+      name: "GPT-4o (via OpenRouter)",
+      description: "Access OpenAI GPT-4o via OpenRouter gateway.",
+      provider: "openrouter",
+      tags: ["general", "tool-calling"]
+    },
+    {
+      id: "deepseek/deepseek-r1",
+      name: "DeepSeek R1 (via OpenRouter)",
+      description: "Open reasoning model with chain-of-thought capabilities.",
+      provider: "openrouter",
+      tags: ["reasoning", "math", "coding"]
+    },
+    {
+      id: "google/gemini-2.0-flash-001",
+      name: "Gemini 2.0 Flash (via OpenRouter)",
+      description: "Next-gen low-latency multimodal model.",
+      provider: "openrouter",
+      tags: ["fast", "multimodal"]
+    },
+    {
+      id: "meta-llama/llama-3.3-70b-instruct",
+      name: "Llama 3.3 70B (via OpenRouter)",
+      description: "Meta open-weights flagship via high-throughput providers.",
+      provider: "openrouter",
+      tags: ["general"]
+    }
+  ],
+  google: [
+    {
+      id: "gemini-2.0-flash",
+      name: "Gemini 2.0 Flash",
+      description: "Ultra-fast multimodal model with comprehensive tool support.",
+      provider: "google",
+      tags: ["recommended", "fast", "multimodal", "tool-calling"],
+      recommended: true
+    },
+    {
+      id: "gemini-2.5-pro",
+      name: "Gemini 2.5 Pro",
+      description: "State-of-the-art model for complex logic, coding, and deep reasoning.",
+      provider: "google",
+      tags: ["reasoning", "coding", "tool-calling"]
+    },
+    {
+      id: "gemini-1.5-pro",
+      name: "Gemini 1.5 Pro",
+      description: "Massive 2M token context window model for deep document analysis.",
+      provider: "google",
+      tags: ["large-context", "analysis"]
+    },
+    {
+      id: "gemini-1.5-flash",
+      name: "Gemini 1.5 Flash",
+      description: "Lightweight, highly capable everyday model.",
+      provider: "google",
+      tags: ["fast", "general"]
+    }
+  ]
+};
+var modelsRoutes = new Hono3();
+modelsRoutes.get("/models/cloudflare", async (c) => {
+  const settings = c.env.agent.services.settings.get();
+  const cfToken = settings.externalKeys?.cloudflareToken;
+  const cfAccount = settings.externalKeys?.cloudflareAccountId;
+  if (cfToken && cfAccount) {
+    try {
+      const res = await fetch(
+        `https://api.cloudflare.com/client/v4/accounts/${cfAccount}/ai/models/search?task=Text%20Generation&per_page=100`,
+        {
+          headers: {
+            Authorization: `Bearer ${cfToken}`,
+            "Content-Type": "application/json"
+          }
+        }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        if (data.result && Array.isArray(data.result) && data.result.length > 0) {
+          const dynamicModels = data.result.map((m) => {
+            const isRec = m.id.includes("llama-3.3-70b-instruct-fp8-fast");
+            const tags = [];
+            if (isRec) tags.push("recommended");
+            if (m.id.includes("fast")) tags.push("fast");
+            if (m.id.includes("r1") || m.id.includes("reasoning")) tags.push("reasoning");
+            if (m.id.includes("vision")) tags.push("vision");
+            if (m.id.includes("llama-3.1") || m.id.includes("llama-3.3")) tags.push("tool-calling");
+            return {
+              id: m.id,
+              name: m.name || m.id,
+              description: m.description,
+              provider: "cloudflare",
+              tags,
+              recommended: isRec
+            };
+          });
+          return c.json({ models: dynamicModels, source: "cloudflare-live" });
+        }
+      }
+    } catch {
+    }
+  }
+  return c.json({ models: DEFAULT_CLOUDFLARE_MODELS, source: "curated" });
+});
+modelsRoutes.get("/models/presets", (c) => {
+  return c.json({ presets: PRESET_MODELS });
+});
+
 // src/api/app.ts
 function createApi() {
   const app = new Hono3().basePath("/api");
@@ -72174,6 +72795,9 @@ function createApi() {
   app.route("/", pushRoutes);
   app.route("/", remoteRoutes);
   app.route("/mcp", mcpRoutes);
+  app.route("/", rulesRoutes);
+  app.route("/", skillsRoutes);
+  app.route("/", modelsRoutes);
   return app;
 }
 __name(createApi, "createApi");
