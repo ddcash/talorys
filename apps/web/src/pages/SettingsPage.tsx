@@ -48,9 +48,51 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 export default function SettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const param = searchParams.get("tab");
-  const tab: Tab = TABS.find((t) => t === param || (param === "AI" && t === "AI & Models")) ?? "General";
+  const code = searchParams.get("code");
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const tab: Tab = TABS.find((t) => t === param || (param === "AI" && t === "AI & Models") || (param === "ai" && t === "AI & Models")) ?? "General";
   const setTab = (t: Tab) => setSearchParams(t === "General" ? {} : { tab: t }, { replace: true });
   const { data: settings, isLoading, error, refetch } = useSettings();
+
+  useEffect(() => {
+    if (!code) return;
+    const pendingRaw = localStorage.getItem("talorys_oauth_pending");
+    let provider = "gemini";
+    let redirectUri = `${window.location.origin}/settings?tab=ai`;
+    if (pendingRaw) {
+      try {
+        const parsed = JSON.parse(pendingRaw);
+        if (parsed.provider) provider = parsed.provider;
+        if (parsed.redirectUri) redirectUri = parsed.redirectUri;
+      } catch {
+        // ignore
+      }
+      localStorage.removeItem("talorys_oauth_pending");
+    }
+
+    const endpoint = provider === "anthropic" ? "/oauth/claude/exchange" : "/oauth/google/exchange";
+
+    api<{ success: boolean; email?: string }>(endpoint, {
+      method: "POST",
+      body: { code, redirect_uri: redirectUri },
+    })
+      .then((res) => {
+        toast(
+          res.email
+            ? `Successfully connected ${provider === "anthropic" ? "Claude" : "Google / Antigravity"} as ${res.email}`
+            : `Successfully connected ${provider === "anthropic" ? "Claude" : "Google / Antigravity"}!`,
+          "success",
+        );
+        queryClient.invalidateQueries({ queryKey: keys.oauthStatus });
+        queryClient.invalidateQueries({ queryKey: keys.settings });
+        setSearchParams({ tab: "AI & Models" }, { replace: true });
+      })
+      .catch((err) => {
+        toast(err instanceof Error ? err.message : "OAuth exchange failed", "error");
+        setSearchParams({ tab: "AI & Models" }, { replace: true });
+      });
+  }, [code]);
   return (
     <div className="mx-auto w-full max-w-3xl px-4 py-8 md:px-8">
       <PageHeader title="Settings" />

@@ -51,7 +51,31 @@ export const keys = {
   marketplaceMcp: ["marketplace", "mcp"] as const,
   marketplaceSkills: ["marketplace", "skills"] as const,
   marketplaceRules: ["marketplace", "rules"] as const,
+  oauthStatus: ["oauth", "status"] as const,
 };
+
+export interface OAuthStatusResponse {
+  google: {
+    connected: boolean;
+    email: string | null;
+    hasRefreshToken: boolean;
+    tokenExpiry: number | null;
+    hasClientConfig: boolean;
+    clientId: string | null;
+  };
+  claude: {
+    connected: boolean;
+    hasRefreshToken: boolean;
+    hasClientConfig: boolean;
+  };
+}
+
+export function useOAuthStatus() {
+  return useQuery({
+    queryKey: keys.oauthStatus,
+    queryFn: () => api<OAuthStatusResponse>("/oauth/status"),
+  });
+}
 
 export function useMarketplaceMcp() {
   return useQuery({

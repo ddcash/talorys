@@ -8,6 +8,7 @@ import { AgentRunner } from "./runner";
 import { createApi } from "../api/app";
 import { CloudflareWorkersAIProvider } from "../ai/workers-ai";
 import { MockAIProvider } from "../ai/mock";
+import { createAIProvider } from "../ai/factory";
 import type { AIProvider } from "../ai/provider";
 import { localDayBounds, formatLocal } from "../services/time";
 import { semanticExtensions } from "../semantic";
@@ -92,8 +93,7 @@ export class TalorysAgent extends Agent<Env, AgentState> {
     const settings = this.services.settings.get();
     if (settings.demoMode) return new MockAIProvider();
     if (this.env.TALORYS_ENV === "development" && this.env.TALORYS_MOCK_AI === "1") return new MockAIProvider();
-    if (!this.env.AI) return null;
-    return new CloudflareWorkersAIProvider(this.env.AI, settings.model);
+    return createAIProvider(this.env, settings);
   }
 
   /** Clef for the memory-history AI check: only with real Workers AI (not mock AI or demo mode). */
@@ -104,7 +104,16 @@ export class TalorysAgent extends Agent<Env, AgentState> {
   }
 
   runner(): AgentRunner {
-    return new AgentRunner(this.services, this.aiProvider(), semanticExtensions(this.services, this.env, (work) => this.ctx.waitUntil(work)));
+    return new AgentRunner(
+      this.services,
+      (override) => {
+        const settings = this.services.settings.get();
+        if (settings.demoMode) return new MockAIProvider();
+        if (this.env.TALORYS_ENV === "development" && this.env.TALORYS_MOCK_AI === "1") return new MockAIProvider();
+        return createAIProvider(this.env, settings, override);
+      },
+      semanticExtensions(this.services, this.env, (work) => this.ctx.waitUntil(work)),
+    );
   }
 
   refreshUnread(): void {

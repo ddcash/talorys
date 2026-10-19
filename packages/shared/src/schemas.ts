@@ -273,9 +273,18 @@ export const externalKeysSchema = z.object({
   gemini: z.string().optional(),
   cloudflareToken: z.string().optional(),
   cloudflareAccountId: z.string().optional(),
+  // Claude OAuth
   anthropicOAuthToken: z.string().optional(),
+  anthropicOAuthRefreshToken: z.string().optional(),
+  anthropicClientId: z.string().optional(),
+  anthropicClientSecret: z.string().optional(),
+  // Google / Antigravity OAuth
   googleOAuthToken: z.string().optional(),
   googleRefreshToken: z.string().optional(),
+  googleClientId: z.string().optional(),
+  googleClientSecret: z.string().optional(),
+  googleTokenExpiry: z.number().optional(),
+  googleUserEmail: z.string().optional(),
 }).partial();
 export type ExternalKeys = z.infer<typeof externalKeysSchema>;
 

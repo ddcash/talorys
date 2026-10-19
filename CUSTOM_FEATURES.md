@@ -180,21 +180,33 @@ Whenever upstream changes are merged, refer to this document to audit, preserve,
 
 ---
 
-## 10. Claude & Antigravity / Google OAuth Authentication (No API Key Required)
+## 10. Claude & Antigravity / Google OAuth Authentication & Interactive Setup Flows
 - **Status**: Active
-- **Description**: Authenticate Anthropic Claude and Google / Antigravity using OAuth Bearer tokens directly instead of raw API keys.
+- **Description**: Authenticate Anthropic Claude and Google / Antigravity using OAuth Bearer tokens directly instead of raw API keys, with full guided setup flows.
 - **Key Capabilities**:
-  - **Claude OAuth Authentication**: Passes OAuth bearer token in `Authorization: Bearer <token>` with `anthropic-version: 2023-06-01` headers without requiring raw API keys.
-  - **Antigravity / Google Cloud OAuth**: Passes OAuth access token (`ya29...` or bearer token) in `Authorization: Bearer <token>` to Google's generative AI models without an AI Studio API key.
-  - **UI Auth Mode Switcher**: Easily toggle between "API Key" and "OAuth Token" modes for Claude and Antigravity, with live "OAuth Connected" status badges and Disconnect buttons.
-  - **OAuth REST Endpoints**: `/api/oauth/token` and `/api/oauth/disconnect` for programmatic token management.
+  - **Interactive OAuth Setup Wizard (`OAuthConnectModal`)**:
+    - **Google / Antigravity Web OAuth Flow**: Auto-generates authorization URL with required scopes (`generative-language`, `cloud-platform`, `userinfo.email`), opens Google consent screen, and automatically exchanges the authorization code on return for access & refresh tokens.
+    - **Instant CLI Token Importer (No Web App Credentials Required)**: Direct one-line command (`gcloud auth print-access-token` / `antigravity auth token`) with real-time validation via Google tokeninfo API, auto-retrieving user email and expiration countdown.
+    - **Automatic Google Refresh Token Handling**: Supports storing `googleRefreshToken`, `googleClientId`, and `googleClientSecret` so tokens can be refreshed automatically without expiring after 1 hour.
+    - **Claude Web OAuth & Bearer Token Validator**: Set up custom Anthropic OAuth app with authorized redirect URI, or paste Claude OAuth token with instant verification ping against Anthropic API.
+  - **Automatic Browser Callback Handling**: `SettingsPage.tsx` automatically intercepts `?code=...` on redirect, triggers `/api/oauth/google/exchange` or `/api/oauth/claude/exchange`, saves tokens to SQLite settings, shows a success toast, and cleans the browser URL.
+  - **OAuth REST Endpoints**:
+    - `/api/oauth/status`: Real-time status of connected Google and Claude accounts, token expiry, and refresh capability.
+    - `/api/oauth/google/auth-url`: Generates consent URL.
+    - `/api/oauth/google/exchange`: Authorization code exchange.
+    - `/api/oauth/google/validate-token`: Google tokeninfo validation.
+    - `/api/oauth/claude/auth-url`, `/exchange`, `/validate-token`: Claude OAuth flow endpoints.
+    - `/api/oauth/disconnect`: Revokes and clears tokens.
 - **Files Touched**:
-  - `packages/shared/src/schemas.ts`: Added `anthropicOAuthToken`, `googleOAuthToken`, and `googleRefreshToken` to `externalKeysSchema`.
+  - `packages/shared/src/schemas.ts`: Added `anthropicOAuthToken`, `anthropicOAuthRefreshToken`, `anthropicClientId`, `anthropicClientSecret`, `googleOAuthToken`, `googleRefreshToken`, `googleClientId`, `googleClientSecret`, `googleTokenExpiry`, `googleUserEmail`.
+  - `apps/agent/src/agent/talorys-agent.ts`: Dynamic AI provider factory integration in `runner()`.
   - `apps/agent/src/ai/external-ai.ts`: `isOAuth` mode setting `Authorization: Bearer <token>` headers.
   - `apps/agent/src/ai/factory.ts`: Automatically initializes OAuth mode when OAuth tokens are present.
-  - `apps/agent/src/api/routes/oauth.ts`: OAuth token validation, storage, and revocation endpoints.
-  - `apps/agent/src/api/app.ts`: Mounted `/api/oauth`.
-  - `apps/web/src/components/AiSettingsCard.tsx`: Dedicated OAuth toggle cards with connection status indicators and token management.
+  - `apps/agent/src/api/routes/oauth.ts`: Full OAuth flow endpoints.
+  - `apps/web/src/hooks/queries.ts`: `keys.oauthStatus`, `useOAuthStatus()`.
+  - `apps/web/src/components/OAuthConnectModal.tsx`: Complete tabbed interactive modal wizard for Google/Antigravity and Claude.
+  - `apps/web/src/components/AiSettingsCard.tsx`: Dedicated "Launch OAuth Setup Flow" buttons and connected status displays.
+  - `apps/web/src/pages/SettingsPage.tsx`: Automatic OAuth code exchange callback listener.
 
 ---
 

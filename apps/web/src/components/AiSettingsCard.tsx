@@ -28,6 +28,7 @@ import {
   type ModelOption,
 } from "../hooks/queries";
 import { cn } from "../lib/utils";
+import { OAuthConnectModal } from "./OAuthConnectModal";
 
 interface ProviderDef {
   id: LLMProviderId;
@@ -133,6 +134,10 @@ export function AiSettingsCard({
   const [geminiAuthMode, setGeminiAuthMode] = useState<"apikey" | "oauth">(
     settings.externalKeys?.googleOAuthToken ? "oauth" : "apikey"
   );
+
+  // OAuth Modal State
+  const [oauthModalOpen, setOauthModalOpen] = useState(false);
+  const [oauthModalProvider, setOauthModalProvider] = useState<"gemini" | "anthropic">("gemini");
 
   // Multi-Provider Failover State
   const [fallbacks, setFallbacks] = useState<FallbackProvider[]>(settings.fallbacks ?? []);
@@ -473,6 +478,21 @@ export function AiSettingsCard({
                       <p className="text-[11px] text-fg-subtle">
                         Authenticates Anthropic Claude with OAuth Bearer tokens without requiring raw API keys.
                       </p>
+                      <div className="pt-1">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          type="button"
+                          onClick={() => {
+                            setOauthModalProvider("anthropic");
+                            setOauthModalOpen(true);
+                          }}
+                          className="border-accent/40 text-accent hover:bg-accent/10 text-xs w-full"
+                        >
+                          <ShieldCheck className="h-3.5 w-3.5 mr-1.5" />
+                          Launch Claude OAuth Setup Flow
+                        </Button>
+                      </div>
                     </div>
                   ) : (
                     <div className="space-y-2">
@@ -589,6 +609,21 @@ export function AiSettingsCard({
                       <p className="text-[11px] text-fg-subtle">
                         Enables Antigravity / Google authentication via OAuth Bearer token without requiring an API key.
                       </p>
+                      <div className="pt-1">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          type="button"
+                          onClick={() => {
+                            setOauthModalProvider("gemini");
+                            setOauthModalOpen(true);
+                          }}
+                          className="border-accent/40 text-accent hover:bg-accent/10 text-xs w-full"
+                        >
+                          <ShieldCheck className="h-3.5 w-3.5 mr-1.5" />
+                          Launch Google / Antigravity OAuth Flow
+                        </Button>
+                      </div>
                     </div>
                   ) : (
                     <div className="space-y-2">
@@ -965,6 +1000,13 @@ export function AiSettingsCard({
           </div>
         </Card>
       </section>
+
+      {/* OAuth Connection Modal */}
+      <OAuthConnectModal
+        open={oauthModalOpen}
+        onClose={() => setOauthModalOpen(false)}
+        initialProvider={oauthModalProvider}
+      />
     </div>
   );
 }
