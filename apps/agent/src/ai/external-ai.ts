@@ -25,13 +25,18 @@ export class ExternalAIProvider implements AIProvider {
       case "anthropic": {
         const clean = this.apiKey.replace(/^Bearer\s+/i, "");
         const anthropic = createAnthropic({
-          apiKey: this.isOAuth ? "placeholder" : this.apiKey,
-          headers: this.isOAuth
+          ...(this.isOAuth
             ? {
-                Authorization: `Bearer ${clean}`,
-                "anthropic-version": "2023-06-01",
+                authToken: clean,
+                headers: {
+                  "anthropic-version": "2023-06-01",
+                  "anthropic-client": "claude-code",
+                  "User-Agent": "claude-code/0.2.29",
+                },
               }
-            : undefined,
+            : {
+                apiKey: this.apiKey,
+              }),
         });
         return anthropic(this.model) as unknown as LanguageModelV1;
       }

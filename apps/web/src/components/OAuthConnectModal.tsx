@@ -59,6 +59,7 @@ export function OAuthConnectModal({
 
   const [copiedUri, setCopiedUri] = useState(false);
   const [copiedCli, setCopiedCli] = useState(false);
+  const [copiedClaudeCmd, setCopiedClaudeCmd] = useState(false);
 
   const redirectUri = typeof window !== "undefined" ? `${window.location.origin}/settings?tab=ai` : "";
 
@@ -73,14 +74,17 @@ export function OAuthConnectModal({
   );
 
   // Copy helper
-  const copyToClipboard = (text: string, type: "uri" | "cli") => {
+  const copyToClipboard = (text: string, type: "uri" | "cli" | "claude") => {
     navigator.clipboard.writeText(text);
     if (type === "uri") {
       setCopiedUri(true);
       setTimeout(() => setCopiedUri(false), 2000);
-    } else {
+    } else if (type === "cli") {
       setCopiedCli(true);
       setTimeout(() => setCopiedCli(false), 2000);
+    } else {
+      setCopiedClaudeCmd(true);
+      setTimeout(() => setCopiedClaudeCmd(false), 2000);
     }
   };
 
@@ -507,20 +511,63 @@ export function OAuthConnectModal({
             {/* Method A: Bearer Token Importer */}
             {claudeMethod === "token" && (
               <div className="space-y-3">
-                <div className="rounded-lg bg-subtle p-3 space-y-1.5 border border-border">
-                  <span className="text-[11px] font-semibold text-fg">Claude OAuth Bearer Token</span>
-                  <p className="text-[10px] text-fg-subtle">
-                    Paste your Claude OAuth user token or Claude Workspace Bearer token. Talorys sends requests with official Claude OAuth headers without an API key.
+                {/* Claude Pro Subscription Box */}
+                <div className="rounded-xl border border-accent/20 bg-accent/5 p-3.5 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-fg flex items-center gap-1.5">
+                      <ShieldCheck className="h-4 w-4 text-accent" />
+                      Claude Pro / Team Subscription (No API Fees)
+                    </span>
+                    <span className="text-[10px] bg-accent/15 text-accent font-medium px-2 py-0.5 rounded-full">
+                      Recommended
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-fg-subtle leading-relaxed">
+                    Anthropic lets Claude Pro subscribers authenticate tools without pay-per-token API charges. Generate your official OAuth token via Claude Code:
+                  </p>
+                  <div className="rounded-lg bg-surface border border-border p-2.5 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-mono text-fg-muted flex items-center gap-1">
+                        <Terminal className="h-3 w-3 text-accent" />
+                        Run in terminal or PowerShell:
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => copyToClipboard("npx @anthropic-ai/claude-code setup-token", "claude")}
+                        className="text-[10px] text-accent hover:underline flex items-center gap-1"
+                      >
+                        {copiedClaudeCmd ? (
+                          <>
+                            <Check className="h-3 w-3 text-emerald-500" /> Copied!
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="h-3 w-3" /> Copy Command
+                          </>
+                        )}
+                      </button>
+                    </div>
+                    <code className="block text-[11px] font-mono bg-subtle px-2 py-1.5 rounded text-fg border border-border select-all">
+                      npx @anthropic-ai/claude-code setup-token
+                    </code>
+                    <ol className="text-[10px] text-fg-subtle list-decimal list-inside space-y-0.5 pt-0.5">
+                      <li>Log in with your Claude Pro account in the browser that opens.</li>
+                      <li>Copy the generated OAuth Bearer token (<code className="text-fg font-mono">sk-ant-oat01-...</code>).</li>
+                      <li>Paste the token below and click <strong>Verify &amp; Connect</strong>.</li>
+                    </ol>
+                  </div>
+                  <p className="text-[10px] text-fg-subtle italic">
+                    Already using Claude Code? Your token is also saved in <code className="text-fg font-mono">~/.claude.json</code>.
                   </p>
                 </div>
 
                 <div>
-                  <label className="text-xs font-medium text-fg">Claude OAuth Token</label>
+                  <label className="text-xs font-medium text-fg">Claude OAuth Bearer Token</label>
                   <Input
                     type="password"
                     value={claudeBearerToken}
                     onChange={(e) => setClaudeBearerToken(e.target.value)}
-                    placeholder="sk-ant-... or Bearer token"
+                    placeholder="sk-ant-oat01-... or Bearer token"
                     className="mt-1 font-mono text-xs"
                   />
                 </div>
@@ -535,7 +582,7 @@ export function OAuthConnectModal({
                     {claudeValResult.valid ? (
                       <>
                         <Check className="h-4 w-4 shrink-0" />
-                        <span>Token verified &amp; connected successfully!</span>
+                        <span>Token verified &amp; connected to Claude Pro subscription!</span>
                       </>
                     ) : (
                       <>

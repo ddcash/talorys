@@ -382,11 +382,17 @@ oauthRoutes.post("/oauth/claude/validate-token", async (c) => {
       headers: {
         Authorization: `Bearer ${clean}`,
         "anthropic-version": "2023-06-01",
+        "anthropic-client": "claude-code",
+        "User-Agent": "claude-code/0.2.29",
       },
     });
 
-    if (res.status === 401 || res.status === 403) {
-      return c.json({ valid: false, error: "Authentication failed. Token is invalid or unauthorized." });
+    const data = await res.json<any>().catch(() => ({}));
+    if (res.status === 401 || res.status === 403 || data.error?.type === "authentication_error") {
+      return c.json({
+        valid: false,
+        error: data.error?.message || "Authentication failed. Token is invalid, expired, or unauthorized.",
+      });
     }
 
     if (save) {
