@@ -1,11 +1,12 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../app";
+import { FREE_LLM_PROVIDERS } from "@talorys/shared";
 
 export interface ModelInfo {
   id: string;
   name: string;
   description?: string;
-  provider: "cloudflare" | "anthropic" | "openai" | "openrouter" | "google";
+  provider: string;
   context_length?: number;
   tags?: string[];
   recommended?: boolean;
@@ -293,6 +294,91 @@ const PRESET_MODELS: Record<string, ModelInfo[]> = {
       tags: ["free", "coding"],
     },
   ],
+  pollinations: [
+    {
+      id: "openai",
+      name: "Pollinations OpenAI (Zero Key)",
+      description: "Instant 100% free AI model, requires no API key or account.",
+      provider: "pollinations",
+      tags: ["recommended", "free", "zero-key"],
+      recommended: true,
+    },
+    {
+      id: "mistral",
+      name: "Pollinations Mistral (Zero Key)",
+      description: "Fast free Mistral model with zero authentication required.",
+      provider: "pollinations",
+      tags: ["free", "zero-key"],
+    },
+    {
+      id: "deepseek",
+      name: "Pollinations DeepSeek (Zero Key)",
+      description: "DeepSeek reasoning model accessible with zero credentials.",
+      provider: "pollinations",
+      tags: ["free", "reasoning", "zero-key"],
+    },
+  ],
+  nvidia: [
+    {
+      id: "meta/llama-3.3-70b-instruct",
+      name: "NVIDIA NIM Llama 3.3 70B",
+      description: "High-performance inference microservice with free developer credits.",
+      provider: "nvidia",
+      tags: ["recommended", "free", "fast"],
+      recommended: true,
+    },
+    {
+      id: "nvidia/llama-3.1-nemotron-70b-instruct",
+      name: "Nemotron 70B Instruct",
+      description: "NVIDIA's customized high-reasoning model optimized for alignment.",
+      provider: "nvidia",
+      tags: ["free", "reasoning"],
+    },
+  ],
+  "github-models": [
+    {
+      id: "gpt-4o",
+      name: "GitHub Models GPT-4o",
+      description: "Free developer playground access to GPT-4o via GitHub Personal Access Token.",
+      provider: "github-models",
+      tags: ["recommended", "free", "multimodal"],
+      recommended: true,
+    },
+    {
+      id: "gpt-4o-mini",
+      name: "GitHub Models GPT-4o-mini",
+      description: "Fast and lightweight GPT-4o model via GitHub Models.",
+      provider: "github-models",
+      tags: ["free", "fast"],
+    },
+  ],
+  siliconflow: [
+    {
+      id: "deepseek-ai/DeepSeek-V3",
+      name: "DeepSeek V3 (SiliconFlow)",
+      description: "Free SiliconCloud tier for DeepSeek V3 general intelligence.",
+      provider: "siliconflow",
+      tags: ["recommended", "free", "coding"],
+      recommended: true,
+    },
+    {
+      id: "deepseek-ai/DeepSeek-R1",
+      name: "DeepSeek R1 (SiliconFlow)",
+      description: "Full chain-of-thought open reasoning model on SiliconCloud.",
+      provider: "siliconflow",
+      tags: ["free", "reasoning"],
+    },
+  ],
+  zhipu: [
+    {
+      id: "glm-4-flash",
+      name: "GLM-4 Flash (Z.ai)",
+      description: "Completely free ultra-fast Chinese/English bilingual foundation model.",
+      provider: "zhipu",
+      tags: ["recommended", "free", "fast"],
+      recommended: true,
+    },
+  ],
 };
 
 export const modelsRoutes = new Hono<AppEnv>();
@@ -358,3 +444,11 @@ modelsRoutes.get("/models/cloudflare", async (c) => {
 modelsRoutes.get("/models/presets", (c) => {
   return c.json({ presets: PRESET_MODELS });
 });
+
+/**
+ * Returns the full catalog of 54 supported free AI providers from FreeLLMAPI.
+ */
+modelsRoutes.get("/models/providers", (c) => {
+  return c.json({ providers: FREE_LLM_PROVIDERS });
+});
+

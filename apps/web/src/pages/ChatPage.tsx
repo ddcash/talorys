@@ -2,6 +2,7 @@ import { type KeyboardEvent, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { useNavigate, useParams } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import type { ChatMessage, Conversation, ToolActivity } from "@talorys/shared";
+import { FREE_LLM_PROVIDERS } from "@talorys/shared";
 import {
   AlertTriangle,
   ArrowUp,
@@ -332,6 +333,11 @@ function ConversationModelSwitcher({
               onChange={(e) => {
                 const p = e.target.value;
                 setProvider(p);
+                const cat = FREE_LLM_PROVIDERS.find((cp) => cp.id === p);
+                if (cat) {
+                  setModel(cat.defaultModel);
+                  return;
+                }
                 if (p === "workers-ai") setModel("@cf/meta/llama-3.3-70b-instruct-fp8-fast");
                 else if (p === "anthropic") setModel("claude-3-7-sonnet-20250219");
                 else if (p === "openai") setModel("gpt-4o");
@@ -346,15 +352,52 @@ function ConversationModelSwitcher({
               className="mt-1 block w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-fg focus:border-accent focus:outline-none"
             >
               <option value="">Inherit Default ({settings.data?.provider ?? "workers-ai"})</option>
-              <option value="workers-ai">Cloudflare Workers AI</option>
-              <option value="freellmapi">FreeLLMAPI Gateway (635 Free Models)</option>
-              <option value="groq">Groq LPUs (Free Ultra-Fast)</option>
-              <option value="cerebras">Cerebras (Free 2,100 T/s)</option>
-              <option value="mistral">Mistral AI (Free Tier)</option>
-              <option value="gemini">Google / Antigravity</option>
-              <option value="anthropic">Anthropic Claude</option>
-              <option value="openai">OpenAI</option>
-              <option value="openrouter">OpenRouter</option>
+              <optgroup label="Core Platforms & Gateways">
+                <option value="workers-ai">Cloudflare Workers AI</option>
+                <option value="freellmapi">FreeLLMAPI Gateway (635 Free Models)</option>
+                <option value="groq">Groq LPUs (Free Ultra-Fast)</option>
+                <option value="cerebras">Cerebras (Free 2,100 T/s)</option>
+                <option value="mistral">Mistral AI (Free Tier)</option>
+                <option value="gemini">Google / Antigravity</option>
+                <option value="anthropic">Anthropic Claude</option>
+                <option value="openai">OpenAI</option>
+                <option value="openrouter">OpenRouter</option>
+              </optgroup>
+              <optgroup label="Zero-Key Free (100% Free / Instant)">
+                {FREE_LLM_PROVIDERS.filter((p) => p.category === "no-key-free").map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} (Zero Key)
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="High-Performance Free Tiers">
+                {FREE_LLM_PROVIDERS.filter((p) => p.category === "high-performance" && !["workers-ai", "groq", "cerebras", "mistral"].includes(p.id)).map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Community Free Routers">
+                {FREE_LLM_PROVIDERS.filter((p) => p.category === "credit-router" && !["freellmapi", "openrouter"].includes(p.id)).map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Developer Free-Key Gateways">
+                {FREE_LLM_PROVIDERS.filter((p) => p.category === "developer-free").map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Regional Free Tiers">
+                {FREE_LLM_PROVIDERS.filter((p) => p.category === "regional").map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </optgroup>
             </select>
           </div>
           <div>

@@ -244,29 +244,33 @@ Whenever upstream changes are merged, refer to this document to audit, preserve,
 
 ---
 
-## 13. FreeLLMAPI Aggregator & Free-Tier Ecosystem Integration (Groq, Cerebras, Mistral)
+## 13. FreeLLMAPI Aggregator & 54 Ecosystem Free Providers
 - **Status**: Active
-- **Description**: Comprehensive integration with FreeLLMAPI (aggregating 34 free providers and 635 models) along with premier high-throughput free-tier providers (Groq LPUs, Cerebras Wafer-Scale Engines, and Mistral Free Tier), all operating under a unified persistent memory system.
+- **Description**: Comprehensive integration with FreeLLMAPI (aggregating 34 free providers and 635 models) and native support for all 54 ecosystem AI providers and free tiers, operating with automated failover and unified persistent memory.
 - **Key Capabilities**:
-  - **FreeLLMAPI Gateway**: Built-in adapter for FreeLLMAPI endpoints (customizable URL and API key, defaulting to `http://localhost:3001/v1` or public gateways).
-  - **Auto Router & Virtual Fusion**: Supports `freellmapi/auto` (intelligently routes across 34 providers and 635 free models for speed and capability) and `freellmapi/fusion` (multi-model parallel consensus).
-  - **Groq LPU Acceleration**: Access Meta Llama 3.3 70B Versatile, Llama 3.1 8B Instant, and Mixtral 8x7B at 250–800 tokens/sec on Groq's free tier.
-  - **Cerebras Wafer-Scale Inference**: Access Llama 3.3 70B and Llama 3.1 8B at world-record speeds of 2,100–2,800 tokens/sec on Cerebras's free tier.
-  - **Mistral Free Tier**: Access Mistral Small Latest and Codestral 22B via Mistral's developer free allocation.
-  - **Unified Persistent Memory & Persona Continuity**: Regardless of which model or provider executes a turn (Workers AI, FreeLLMAPI, Groq, Cerebras, Mistral, Claude, Gemini), all models share the exact same persistent context:
+  - **All 54 Ecosystem Providers Supported**:
+    - **Zero-Key Instant Free (No API Key Required)**: Pollinations, Kilo Gateway, OVH AI Endpoints, LLM7, AI Horde.
+    - **High-Performance Free Tiers**: Groq LPUs (250–800 t/s), Cerebras Wafer-Scale (2,100+ t/s), NVIDIA NIM, Mistral Free Tier, Google AI Studio, GitHub Models, Cohere, Cloudflare Workers AI.
+    - **Credit & Community Free Routers**: FreeLLMAPI Unified Router (7.4B tokens/mo), OpenRouter (:free models), ACLIDE, Sail Research, ElectronHub, Experiential Labs, Router9, Septor Labs, CLōD, Speechify, BlazeAPI, Lucidity Composite, Api.Airforce, DreamPrompting, Waterfall, Logfare, B.AI, AMD Radeon Cloud.
+    - **Developer Free-Key Gateways**: HuggingFace Router, OpenCode Zen, Agnes AI, Reka, SiliconFlow, Routeway, BazaarLink, AINative Studio, Aion Labs, Requesty, NavyAI, NaraRouter, OrcaRouter, UnoRouter, xKiro, AnyAPI, Ollama.
+    - **Regional & International Free Tiers**: SEA-LION, Zhipu AI (GLM-4 Flash free tier), ModelScope, Baidu Qianfan, Volcengine Ark, LongCat, iFlytek Spark.
+  - **Free Providers Directory UI**: Visual interactive catalog in Settings with category filter tabs (Zero-Key, High-Speed, Credit Routers, Dev Free-Key, Regional), instant "Use as Primary", "+ Fallback", and inline custom API Key / endpoint URL editors.
+  - **Zero-Key Instant Free Execution**: Providers with `requiresKey: false` automatically use anonymous bearer authentication so you can chat immediately with zero configuration.
+  - **Extensible Fallback & Failover Chaining**: Any of the 54 providers can be added to the automatic failover execution chain with priority drag-and-drop ordering.
+  - **Unified Persistent Memory & Persona Continuity**: Regardless of which model or provider executes a turn (Workers AI, FreeLLMAPI, Groq, Cerebras, Pollinations, NVIDIA NIM, Claude, Gemini):
     - Long-term memory notes from Cloudflare Inkstone MCP
     - Durable Object SQLite facts and activity logs
     - Custom rules and skills from the marketplace
     - Complete conversation history
     - Enforced unified persona prompt clause ensuring seamless continuity across all interactions.
-  - **Per-Conversation Model Selection**: Freely switch conversations between FreeLLMAPI, Groq, Cerebras, Mistral, Cloudflare, and major providers using the chat model switcher.
+  - **Per-Conversation Model Selection**: Freely switch conversations between FreeLLMAPI, Groq, Cerebras, Mistral, Pollinations, Cloudflare, and major providers using the chat model switcher.
 - **Files Touched**:
-  - `packages/shared/src/schemas.ts`: Expanded `llmProviderSchema` with `"freellmapi"`, `"groq"`, `"cerebras"`, `"mistral"`; added keys to `externalKeysSchema`.
-  - `apps/agent/src/ai/external-ai.ts`: Implemented OpenAI-compatible adapters with dedicated endpoints for FreeLLMAPI, Groq, Cerebras, and Mistral.
-  - `apps/agent/src/ai/factory.ts`: Wired provider resolution with fallback defaults.
-  - `apps/agent/src/api/routes/models.ts`: Added presets catalog for FreeLLMAPI (5 models), Groq (3 models), Cerebras (2 models), Mistral (2 models).
-  - `apps/agent/src/agent/prompt.ts`: Injected unified AI memory and personality continuity system instructions.
-  - `apps/agent/src/agent/runner.ts`: Multi-provider failover routing with persistent context injection.
-  - `apps/web/src/components/AiSettingsCard.tsx`: Added provider credentials and endpoint configuration fields.
-  - `apps/web/src/pages/ChatPage.tsx`: Added new providers and models to the conversation model switcher.
+  - `packages/shared/src/providers-catalog.ts`: Complete structured metadata for all 54 ecosystem providers.
+  - `packages/shared/src/schemas.ts`: Updated `llmProviderSchema` and `externalKeysSchema` with `providerKeys` and `providerEndpoints` maps.
+  - `apps/agent/src/ai/external-ai.ts`: Dynamic OpenAI-compatible resolution for any provider in the 54-provider catalog.
+  - `apps/agent/src/ai/factory.ts`: Automatic credential resolution with anonymous fallback for zero-key providers.
+  - `apps/agent/src/api/routes/models.ts`: Added `/models/providers` endpoint and presets for zero-key, NVIDIA, GitHub Models, and SiliconFlow.
+  - `apps/web/src/components/AiSettingsCard.tsx`: Complete Free AI Providers Directory with search, filters, inline config, and fallback optgroups.
+  - `apps/web/src/pages/ChatPage.tsx`: Grouped provider options in conversation model switcher.
+
 

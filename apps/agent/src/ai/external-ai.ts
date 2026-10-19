@@ -5,15 +5,9 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import type { AgentEvent, AIProvider, GenerateRequest, ToolRequest, Usage } from "./provider";
 import { classifyAiError, estimateTokens, modelUsage, tokens, withUsage } from "./provider";
 
-export type SupportedExternalProvider =
-  | "anthropic"
-  | "openai"
-  | "openrouter"
-  | "gemini"
-  | "freellmapi"
-  | "groq"
-  | "cerebras"
-  | "mistral";
+import { FREE_LLM_PROVIDERS } from "@talorys/shared";
+
+export type SupportedExternalProvider = string;
 
 export class ExternalAIProvider implements AIProvider {
   readonly billable = false; // Billed on user's own external provider account
@@ -97,8 +91,24 @@ export class ExternalAIProvider implements AIProvider {
         });
         return mistral(this.model) as unknown as LanguageModelV1;
       }
-      default:
-        throw new Error(`Unsupported external AI provider: ${this.id}`);
+      default: {
+        // Dynamic resolution across all 54 FreeLLMAPI providers and custom endpoints
+        const catalogEntry = FREE_LLM_PROVIDERS.find((p) => p.id.toLowerCase() === this.id.toLowerCase());
+        const baseURL = this.options?.endpoint || catalogEntry?.defaultBaseUrl;
+
+        if (baseURL) {
+          const provider = createOpenAI({
+            baseURL,
+            apiKey: this.apiKey || "anonymous",
+            headers: {
+              "User-Agent": "Talorys-AI/0.1.7",
+            },
+          });
+          return provider(this.model) as unknown as LanguageModelV1;
+        }
+
+        throw new Error(`Unsupported external AI provider: "${this.id}". Configure an endpoint in Settings -> AI.`);
+      }
     }
   }
 

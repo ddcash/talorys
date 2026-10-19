@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { AiBudget, ExternalKeys, FallbackProvider, LLMProviderId, Limits, Settings } from "@talorys/shared";
-import { LIMIT_CEILINGS } from "@talorys/shared";
+import { LIMIT_CEILINGS, FREE_LLM_PROVIDERS, type FreeLLMProviderInfo } from "@talorys/shared";
 import {
   ArrowDown,
   ArrowUp,
@@ -209,10 +209,31 @@ export function AiSettingsCard({
   const [cfSearch, setCfSearch] = useState("");
   const [showCfDropdown, setShowCfDropdown] = useState(false);
 
-  const activeProviderInfo: ProviderDef = PROVIDERS.find((p) => p.id === provider) ?? DEFAULT_PROVIDER_INFO;
+  // Free Providers Directory State
+  const [providerSearch, setProviderSearch] = useState("");
+  const [providerCategoryFilter, setProviderCategoryFilter] = useState<string>("all");
+  const [editingProviderId, setEditingProviderId] = useState<string | null>(null);
+
+  const catProvider = FREE_LLM_PROVIDERS.find((p) => p.id === provider);
+  const activeProviderInfo: ProviderDef =
+    PROVIDERS.find((p) => p.id === provider) ??
+    (catProvider
+      ? {
+          id: catProvider.id,
+          name: catProvider.name,
+          badge: catProvider.freeTierNote,
+          description: `Endpoint: ${externalKeys.providerEndpoints?.[catProvider.id] || catProvider.defaultBaseUrl}. ${catProvider.freeTierNote}.`,
+          docsUrl: catProvider.docUrl,
+        }
+      : DEFAULT_PROVIDER_INFO);
 
   const handleProviderSelect = (newProvider: LLMProviderId) => {
     setProvider(newProvider);
+    const catEntry = FREE_LLM_PROVIDERS.find((cp) => cp.id === newProvider);
+    if (catEntry) {
+      setModel(catEntry.defaultModel);
+      return;
+    }
     if (newProvider === "workers-ai") {
       if (!model.startsWith("@cf/")) setModel("@cf/meta/llama-3.3-70b-instruct-fp8-fast");
     } else if (newProvider === "freellmapi") {
@@ -240,6 +261,38 @@ export function AiSettingsCard({
     } else if (newProvider === "gemini") {
       if (!model.startsWith("gemini-")) setModel("gemini-2.0-flash");
     }
+  };
+
+  const handleSelectEcosystemProvider = (p: FreeLLMProviderInfo) => {
+    setProvider(p.id);
+    setModel(p.defaultModel);
+  };
+
+  const handleAddEcosystemFallback = (p: FreeLLMProviderInfo) => {
+    setFallbacks((prev) => [
+      ...prev,
+      { provider: p.id, model: p.defaultModel },
+    ]);
+  };
+
+  const handleSetProviderKey = (providerId: string, keyVal: string) => {
+    setExternalKeys((prev) => ({
+      ...prev,
+      providerKeys: {
+        ...(prev.providerKeys ?? {}),
+        [providerId]: keyVal,
+      },
+    }));
+  };
+
+  const handleSetProviderEndpoint = (providerId: string, endpointVal: string) => {
+    setExternalKeys((prev) => ({
+      ...prev,
+      providerEndpoints: {
+        ...(prev.providerEndpoints ?? {}),
+        [providerId]: endpointVal,
+      },
+    }));
   };
 
   const handleAddFallback = () => {
@@ -300,6 +353,20 @@ export function AiSettingsCard({
 
   const presetKey = provider === "workers-ai" ? "cloudflare" : provider === "gemini" ? "google" : provider;
   const availablePresets = presets.data?.[presetKey] ?? [];
+
+  const filteredEcosystemProviders = FREE_LLM_PROVIDERS.filter((p) => {
+    if (providerCategoryFilter !== "all" && p.category !== providerCategoryFilter) {
+      return false;
+    }
+    if (!providerSearch.trim()) return true;
+    const q = providerSearch.toLowerCase();
+    return (
+      p.name.toLowerCase().includes(q) ||
+      p.id.toLowerCase().includes(q) ||
+      p.freeTierNote.toLowerCase().includes(q) ||
+      p.defaultModel.toLowerCase().includes(q)
+    );
+  });
 
   return (
     <div className="space-y-6">
@@ -956,6 +1023,188 @@ export function AiSettingsCard({
         </Card>
       </section>
 
+      {/* Free AI Providers Directory (FreeLLMAPI & Ecosystem) */}
+      <section className="space-y-2">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-1">
+          <div>
+            <h2 className="text-xs font-medium uppercase tracking-wider text-fg-subtle flex items-center gap-1.5">
+              <Globe className="h-4 w-4 text-accent" />
+              Free AI Providers Directory ({FREE_LLM_PROVIDERS.length} Providers Supported)
+            </h2>
+            <p className="text-xs text-fg-subtle mt-0.5">
+              Connect to any provider from the FreeLLMAPI ecosystem. Use zero-key providers instantly or add credentials for community credit tiers.
+            </p>
+          </div>
+        </div>
+
+        <Card className="p-4 space-y-4">
+          {/* Search & Category Filter Toolbar */}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="relative flex-1 max-w-sm">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-fg-subtle" />
+              <Input
+                value={providerSearch}
+                onChange={(e) => setProviderSearch(e.target.value)}
+                placeholder="Search by provider name, model, or notes..."
+                className="pl-8 text-xs"
+              />
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {[
+                { id: "all", label: "All", count: FREE_LLM_PROVIDERS.length },
+                { id: "no-key-free", label: "✨ Zero Key", count: FREE_LLM_PROVIDERS.filter((p) => p.category === "no-key-free").length },
+                { id: "high-performance", label: "⚡ High Speed", count: FREE_LLM_PROVIDERS.filter((p) => p.category === "high-performance").length },
+                { id: "credit-router", label: "🌐 Credit Routers", count: FREE_LLM_PROVIDERS.filter((p) => p.category === "credit-router").length },
+                { id: "developer-free", label: "🔑 Dev Free-Key", count: FREE_LLM_PROVIDERS.filter((p) => p.category === "developer-free").length },
+                { id: "regional", label: "🌏 Regional", count: FREE_LLM_PROVIDERS.filter((p) => p.category === "regional").length },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setProviderCategoryFilter(tab.id)}
+                  className={cn(
+                    "flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition-all",
+                    providerCategoryFilter === tab.id
+                      ? "bg-accent text-white"
+                      : "bg-surface border border-border text-fg-subtle hover:text-fg hover:bg-subtle"
+                  )}
+                >
+                  <span>{tab.label}</span>
+                  <span className="text-[10px] opacity-75">({tab.count})</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Providers Grid */}
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 max-h-[480px] overflow-y-auto pr-1">
+            {filteredEcosystemProviders.map((p) => {
+              const isCurrent = provider === p.id;
+              const fallbackIdx = fallbacks.findIndex((fb) => fb.provider === p.id);
+              const customKey = externalKeys.providerKeys?.[p.id] ?? "";
+              const customEndpoint = externalKeys.providerEndpoints?.[p.id] ?? "";
+              const isEditing = editingProviderId === p.id;
+
+              return (
+                <div
+                  key={p.id}
+                  className={cn(
+                    "flex flex-col justify-between rounded-xl border p-3.5 transition-all text-xs",
+                    isCurrent
+                      ? "border-accent bg-accent/5 ring-1 ring-accent"
+                      : "border-border bg-surface hover:border-border-strong"
+                  )}
+                >
+                  <div className="space-y-2">
+                    <div className="flex items-start justify-between gap-1.5">
+                      <div>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-semibold text-fg">{p.name}</span>
+                          {!p.requiresKey ? (
+                            <Badge tone="success" className="text-[9px] px-1.5 py-0">
+                              Zero Key
+                            </Badge>
+                          ) : (
+                            <Badge tone="neutral" className="text-[9px] px-1.5 py-0">
+                              Free Key
+                            </Badge>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-fg-subtle mt-0.5">{p.freeTierNote}</p>
+                      </div>
+                      {isCurrent && (
+                        <Badge tone="accent" className="text-[9px] shrink-0">
+                          Active Primary
+                        </Badge>
+                      )}
+                      {fallbackIdx >= 0 && (
+                        <Badge tone="neutral" className="text-[9px] shrink-0">
+                          Fallback #{fallbackIdx + 1}
+                        </Badge>
+                      )}
+                    </div>
+
+                    <div className="rounded-md bg-subtle p-2 space-y-1">
+                      <div className="flex items-center justify-between text-[10px] text-fg-subtle">
+                        <span>Default Model:</span>
+                        <span className="font-mono font-medium text-fg truncate max-w-[140px]" title={p.defaultModel}>
+                          {p.defaultModel}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between text-[10px] text-fg-subtle">
+                        <span>Endpoint:</span>
+                        <span className="font-mono truncate max-w-[150px]" title={customEndpoint || p.defaultBaseUrl}>
+                          {customEndpoint || p.defaultBaseUrl}
+                        </span>
+                      </div>
+                    </div>
+
+                    {isEditing && (
+                      <div className="pt-2 border-t border-border space-y-2">
+                        {p.requiresKey ? (
+                          <div>
+                            <label className="text-[10px] font-medium text-fg">API Key</label>
+                            <Input
+                              type="password"
+                              value={customKey}
+                              onChange={(e) => handleSetProviderKey(p.id, e.target.value)}
+                              placeholder={`Enter ${p.name} key...`}
+                              className="mt-0.5 text-xs font-mono h-7"
+                            />
+                          </div>
+                        ) : (
+                          <p className="text-[10px] text-emerald-500 font-medium">
+                            ✨ No API key required for {p.name}!
+                          </p>
+                        )}
+                        <div>
+                          <label className="text-[10px] font-medium text-fg">Custom Endpoint URL</label>
+                          <Input
+                            value={customEndpoint}
+                            onChange={(e) => handleSetProviderEndpoint(p.id, e.target.value)}
+                            placeholder={p.defaultBaseUrl}
+                            className="mt-0.5 text-xs font-mono h-7"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="mt-3 pt-2.5 border-t border-border flex items-center justify-between gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setEditingProviderId(isEditing ? null : p.id)}
+                      className="text-[10px] font-medium text-fg-subtle hover:text-fg underline-offset-2 hover:underline"
+                    >
+                      {isEditing ? "Close" : "Config"}
+                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => handleAddEcosystemFallback(p)}
+                        className="h-6 px-2 text-[10px]"
+                        title="Add to fallback failover chain"
+                      >
+                        + Fallback
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant={isCurrent ? "secondary" : "outline"}
+                        onClick={() => handleSelectEcosystemProvider(p)}
+                        className="h-6 px-2 text-[10px]"
+                      >
+                        {isCurrent ? "Selected" : "Use Primary"}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      </section>
+
       {/* Zero-Cost AI Usage Budgets & Failover Guards */}
       <section className="space-y-2">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-1">
@@ -1178,6 +1427,11 @@ export function AiSettingsCard({
                   onChange={(e) => {
                     const nextP = e.target.value as LLMProviderId;
                     setNewFallbackProvider(nextP);
+                    const cat = FREE_LLM_PROVIDERS.find((cp) => cp.id === nextP);
+                    if (cat) {
+                      setNewFallbackModel(cat.defaultModel);
+                      return;
+                    }
                     if (nextP === "workers-ai") setNewFallbackModel("@cf/meta/llama-3.3-70b-instruct-fp8-fast");
                     else if (nextP === "freellmapi") setNewFallbackModel("freellmapi/auto");
                     else if (nextP === "groq") setNewFallbackModel("llama-3.3-70b-versatile");
@@ -1190,11 +1444,48 @@ export function AiSettingsCard({
                   }}
                   className="mt-1 block w-full rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs text-fg focus:border-accent focus:outline-none"
                 >
-                  {PROVIDERS.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
+                  <optgroup label="Core Platforms & Aggregators">
+                    {PROVIDERS.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Zero-Key Free (100% Free / Instant)">
+                    {FREE_LLM_PROVIDERS.filter((p) => p.category === "no-key-free").map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} (Zero Key)
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="High-Performance Free Tiers">
+                    {FREE_LLM_PROVIDERS.filter((p) => p.category === "high-performance" && !PROVIDERS.some((core) => core.id === p.id)).map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Credit & Community Routers">
+                    {FREE_LLM_PROVIDERS.filter((p) => p.category === "credit-router" && !PROVIDERS.some((core) => core.id === p.id)).map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Developer Free-Key Gateways">
+                    {FREE_LLM_PROVIDERS.filter((p) => p.category === "developer-free").map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Regional Free Tiers">
+                    {FREE_LLM_PROVIDERS.filter((p) => p.category === "regional").map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </optgroup>
                 </select>
               </div>
 

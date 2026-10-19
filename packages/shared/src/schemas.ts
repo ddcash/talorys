@@ -257,18 +257,8 @@ export const mcpTestSchema = z.object({
 
 // ---------- LLM Providers ----------
 
-export const llmProviderSchema = z.enum([
-  "workers-ai",
-  "anthropic",
-  "openai",
-  "openrouter",
-  "gemini",
-  "freellmapi",
-  "groq",
-  "cerebras",
-  "mistral",
-]);
-export type LLMProviderId = z.infer<typeof llmProviderSchema>;
+export const llmProviderSchema = z.string().min(1).max(60);
+export type LLMProviderId = string;
 
 export const fallbackProviderSchema = z.object({
   provider: llmProviderSchema,
@@ -301,6 +291,9 @@ export const externalKeysSchema = z.object({
   groqKey: z.string().optional(),
   cerebrasKey: z.string().optional(),
   mistralKey: z.string().optional(),
+  // Extensible Provider Key & Endpoint Maps for all 54 ecosystem providers
+  providerKeys: z.record(z.string(), z.string()).optional(),
+  providerEndpoints: z.record(z.string(), z.string()).optional(),
 }).partial();
 export type ExternalKeys = z.infer<typeof externalKeysSchema>;
 
