@@ -139,3 +139,75 @@ Whenever upstream changes are merged, refer to this document to audit, preserve,
   - `apps/agent/src/agent/runner.ts`: Resolves conversation overrides dynamically per turn.
   - `apps/web/src/components/AiSettingsCard.tsx`: Provider switcher tabs, API key inputs with show/hide eye toggle, preset recommendations.
   - `apps/web/src/pages/ChatPage.tsx`: `ConversationModelSwitcher` in chat header.
+
+---
+
+## 9. Curated Marketplaces: MCP Servers, Skills, & Rules
+- **Status**: Active
+- **Description**: Integrated one-click installation marketplaces pulling from reputable sources across the ecosystem (Anthropic/official MCP servers, Cloudflare, Agency security playbooks, OWASP guidelines, and modern coding standards).
+- **Key Capabilities**:
+  - **Reputable MCP Marketplace**:
+    - **Cloudflare Inkstone**: Native long-term memory worker for notes & retrieval.
+    - **GitHub Official MCP**: Repository exploration, PR reviews, issues, and git search.
+    - **Brave Search**: Real-time web index queries with privacy preservation.
+    - **Fetch Web Scraper**: Converts web pages directly into clean Markdown.
+    - **PostgreSQL Inspector**: Read-only schema introspection and query analysis.
+    - **Knowledge Graph Memory**: Graph-structured persistent entity and relation memory.
+    - **Cloudflare Developer Platform**: Worker deployments, D1 databases, and KV access.
+    - **Slack Workspace Connector**: Public channel queries and team thread search.
+  - **Verified Skills Marketplace**:
+    - **Application Security & Vulnerability Auditor**: Hunts injection sinks, hardcoded credentials, and CWE vulnerabilities.
+    - **Cloud Security & Zero-Trust Architect**: Least-privilege architectures, IaC validation, and boundary reviews.
+    - **Deep Intelligence & Knowledge Synthesizer**: Cross-references notes, memories, and MCP queries.
+    - **Product Strategist & Roadmapper**: Transforms goals into PRDs, user stories, and actionable tasks.
+    - **Incident Response & Forensics Specialist**: IOC containment, audit log review, and post-mortems.
+    - **Technical Documentation Specialist**: ADRs, architecture diagrams, and developer documentation.
+  - **Battle-Tested Rules Marketplace**:
+    - **Concise & High-Signal Persona**: Zero filler phrases or boilerplate pleasantries.
+    - **Strict Modern TypeScript & Clean Code**: Strictly-typed patterns without `any`.
+    - **Defensive Coding & OWASP Guidelines**: Strict input sanitization and credential protection.
+    - **Structured Markdown & Visual Output**: Clear hierarchy, tables, callouts, and code diffs.
+    - **Proactive Contextual Memory Recall**: Proactively references habits and project context.
+    - **Socratic Clarification & Discovery**: Clarifies ambiguous goals before broad executions.
+  - **One-Click Installation**: Full UI modal with instant installation directly into Durable Object SQLite storage (`tal_mcp_servers`, `tal_skills`, `tal_rules`).
+- **Files Touched**:
+  - `packages/shared/src/schemas.ts`: `MarketplaceMcp`, `MarketplaceSkill`, `MarketplaceRule`.
+  - `apps/agent/src/api/routes/marketplace.ts`: Catalog endpoints (`/api/marketplace/mcp`, `/skills`, `/rules`) and 1-click install (`/install/mcp`, `/install/skill`, `/install/rule`).
+  - `apps/agent/src/api/app.ts`: Mounted `/api/marketplace`.
+  - `apps/web/src/hooks/queries.ts`: `useMarketplaceMcp()`, `useMarketplaceSkills()`, `useMarketplaceRules()`.
+  - `apps/web/src/components/MarketplaceDialog.tsx`: Full-featured tabbed modal dialog with category badges and one-click install buttons.
+  - `apps/web/src/components/McpSettingsCard.tsx`, `SkillsSettingsCard.tsx`, `RulesSettingsCard.tsx`: Integrated Marketplace launch buttons.
+
+---
+
+## 10. Claude & Antigravity / Google OAuth Authentication (No API Key Required)
+- **Status**: Active
+- **Description**: Authenticate Anthropic Claude and Google / Antigravity using OAuth Bearer tokens directly instead of raw API keys.
+- **Key Capabilities**:
+  - **Claude OAuth Authentication**: Passes OAuth bearer token in `Authorization: Bearer <token>` with `anthropic-version: 2023-06-01` headers without requiring raw API keys.
+  - **Antigravity / Google Cloud OAuth**: Passes OAuth access token (`ya29...` or bearer token) in `Authorization: Bearer <token>` to Google's generative AI models without an AI Studio API key.
+  - **UI Auth Mode Switcher**: Easily toggle between "API Key" and "OAuth Token" modes for Claude and Antigravity, with live "OAuth Connected" status badges and Disconnect buttons.
+  - **OAuth REST Endpoints**: `/api/oauth/token` and `/api/oauth/disconnect` for programmatic token management.
+- **Files Touched**:
+  - `packages/shared/src/schemas.ts`: Added `anthropicOAuthToken`, `googleOAuthToken`, and `googleRefreshToken` to `externalKeysSchema`.
+  - `apps/agent/src/ai/external-ai.ts`: `isOAuth` mode setting `Authorization: Bearer <token>` headers.
+  - `apps/agent/src/ai/factory.ts`: Automatically initializes OAuth mode when OAuth tokens are present.
+  - `apps/agent/src/api/routes/oauth.ts`: OAuth token validation, storage, and revocation endpoints.
+  - `apps/agent/src/api/app.ts`: Mounted `/api/oauth`.
+  - `apps/web/src/components/AiSettingsCard.tsx`: Dedicated OAuth toggle cards with connection status indicators and token management.
+
+---
+
+## 11. Multi-AI Provider Automatic Failover & Redundancy Chain
+- **Status**: Active
+- **Description**: Configure multiple backup AI models and providers. When your primary model runs out of usage, hits rate limits (HTTP 429), or faces provider downtime, Talorys automatically switches seamlessly to your next configured provider in the fallback chain without dropping your conversation.
+- **Key Capabilities**:
+  - **Execution Fallback Chain**: Define an ordered sequence of backup providers (e.g. Primary: Anthropic Claude 3.7 Sonnet -> Fallback 1: Cloudflare Llama 3.3 70B -> Fallback 2: Google Gemini 2.0 Flash).
+  - **Automatic Rate Limit & Quota Recovery**: Detects rate limits (`429`), quota exhaustion (`insufficient_quota`), network errors, or provider outages, seamlessly streaming a brief notice (`*[Notice: <provider> quota/rate limit reached. Failing over to <fallback>...]*`) before delivering the response using the fallback model.
+  - **Auto-Failover Toggle**: Enable or disable automatic failover globally in Settings (`autoFailover`).
+  - **UI Chain Manager**: Drag/move fallbacks up or down, delete backups, or add new providers with instant preset selection in `AiSettingsCard.tsx`.
+- **Files Touched**:
+  - `packages/shared/src/schemas.ts`: `fallbackProviderSchema`, `FallbackProvider`, updated `settingsSchema` and `settingsUpdateSchema`.
+  - `apps/agent/src/services/settings.ts`: Default settings (`fallbacks: []`, `autoFailover: true`), get and update handlers.
+  - `apps/agent/src/agent/runner.ts`: Automatic fallback failover loop with live transition yield and candidate chaining.
+  - `apps/web/src/components/AiSettingsCard.tsx`: Complete failover chain UI manager with priority ordering, move controls, and fallback creation.

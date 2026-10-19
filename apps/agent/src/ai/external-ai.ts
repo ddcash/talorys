@@ -14,12 +14,22 @@ export class ExternalAIProvider implements AIProvider {
     readonly id: SupportedExternalProvider,
     readonly model: string,
     private readonly apiKey: string,
+    private readonly isOAuth: boolean = false,
   ) {}
 
   private createModel(): LanguageModelV1 {
     switch (this.id) {
       case "anthropic": {
-        const anthropic = createAnthropic({ apiKey: this.apiKey });
+        const clean = this.apiKey.replace(/^Bearer\s+/i, "");
+        const anthropic = createAnthropic({
+          apiKey: this.isOAuth ? "placeholder" : this.apiKey,
+          headers: this.isOAuth
+            ? {
+                Authorization: `Bearer ${clean}`,
+                "anthropic-version": "2023-06-01",
+              }
+            : undefined,
+        });
         return anthropic(this.model) as unknown as LanguageModelV1;
       }
       case "openai": {
@@ -38,7 +48,15 @@ export class ExternalAIProvider implements AIProvider {
         return openrouter(this.model) as unknown as LanguageModelV1;
       }
       case "gemini": {
-        const google = createGoogleGenerativeAI({ apiKey: this.apiKey });
+        const clean = this.apiKey.replace(/^Bearer\s+/i, "");
+        const google = createGoogleGenerativeAI({
+          apiKey: this.isOAuth ? "placeholder" : this.apiKey,
+          headers: this.isOAuth
+            ? {
+                Authorization: `Bearer ${clean}`,
+              }
+            : undefined,
+        });
         return google(this.model) as unknown as LanguageModelV1;
       }
       default:

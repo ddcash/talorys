@@ -17,6 +17,9 @@ import type {
   McpServer,
   Rule,
   Skill,
+  MarketplaceMcp,
+  MarketplaceSkill,
+  MarketplaceRule,
 } from "@talorys/shared";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
@@ -45,7 +48,34 @@ export const keys = {
   skills: ["skills"] as const,
   cloudflareModels: ["models", "cloudflare"] as const,
   presetModels: ["models", "presets"] as const,
+  marketplaceMcp: ["marketplace", "mcp"] as const,
+  marketplaceSkills: ["marketplace", "skills"] as const,
+  marketplaceRules: ["marketplace", "rules"] as const,
 };
+
+export function useMarketplaceMcp() {
+  return useQuery({
+    queryKey: keys.marketplaceMcp,
+    queryFn: () => api<{ servers: MarketplaceMcp[] }>("/marketplace/mcp").then((r) => r.servers),
+    staleTime: 60 * 60_000,
+  });
+}
+
+export function useMarketplaceSkills() {
+  return useQuery({
+    queryKey: keys.marketplaceSkills,
+    queryFn: () => api<{ skills: MarketplaceSkill[] }>("/marketplace/skills").then((r) => r.skills),
+    staleTime: 60 * 60_000,
+  });
+}
+
+export function useMarketplaceRules() {
+  return useQuery({
+    queryKey: keys.marketplaceRules,
+    queryFn: () => api<{ rules: MarketplaceRule[] }>("/marketplace/rules").then((r) => r.rules),
+    staleTime: 60 * 60_000,
+  });
+}
 
 export function useRules() {
   return useQuery({ queryKey: keys.rules, queryFn: () => api<{ rules: Rule[] }>("/rules").then((r) => r.rules) });

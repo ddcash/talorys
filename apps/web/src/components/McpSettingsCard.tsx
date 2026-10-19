@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { McpServer, McpToolSummary } from "@talorys/shared";
 import { CheckCircle2, ChevronDown, ChevronRight, Database, ExternalLink, HelpCircle, Layers, Plus, RefreshCw, Trash2, Zap } from "lucide-react";
 import { Badge, Button, Card, ConfirmDialog, ErrorNotice, Input, Label, Spinner, Switch } from "./ui";
+import { MarketplaceDialog } from "./MarketplaceDialog";
 import { keys, useApiMutation, useMcpServers } from "../hooks/queries";
 import { useToast } from "../hooks/toast";
 import { api } from "../lib/api";
@@ -13,6 +14,7 @@ export function McpSettingsCard() {
   const toast = useToast();
   const { data: servers = [], isLoading, error } = useMcpServers();
 
+  const [showMarketplace, setShowMarketplace] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [showInkstonePreset, setShowInkstonePreset] = useState(false);
   const [expandedServerId, setExpandedServerId] = useState<string | null>(null);
@@ -148,6 +150,15 @@ export function McpSettingsCard() {
         <div className="flex items-center gap-2">
           {!showAddForm && (
             <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowMarketplace(true)}
+                className="gap-1.5 text-xs border-accent/30 text-accent hover:bg-accent/10"
+              >
+                <Layers className="h-3.5 w-3.5" />
+                Marketplace
+              </Button>
               <Button
                 variant="outline"
                 size="sm"
@@ -476,6 +487,12 @@ export function McpSettingsCard() {
           loading={deleteServer.isPending}
         />
       )}
+
+      <MarketplaceDialog
+        open={showMarketplace}
+        onClose={() => setShowMarketplace(false)}
+        initialTab="mcp"
+      />
     </section>
   );
 }

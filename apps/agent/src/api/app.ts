@@ -17,6 +17,8 @@ import { mcpRoutes } from "./routes/mcp";
 import { rulesRoutes } from "./routes/rules";
 import { skillsRoutes } from "./routes/skills";
 import { modelsRoutes } from "./routes/models";
+import { marketplaceRoutes } from "./routes/marketplace";
+import { oauthRoutes } from "./routes/oauth";
 
 export interface AppEnv {
   Bindings: { agent: TalorysAgent; env: Env };
@@ -56,6 +58,8 @@ export function createApi() {
   app.route("/", rulesRoutes);
   app.route("/", skillsRoutes);
   app.route("/", modelsRoutes);
+  app.route("/", marketplaceRoutes);
+  app.route("/", oauthRoutes);
 
   return app;
 }

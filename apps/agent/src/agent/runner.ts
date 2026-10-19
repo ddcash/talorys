@@ -220,44 +220,98 @@ export class AgentRunner {
       );
       const providerTools = toProviderTools(executor);
 
-      // Memory selection and summarizing may have spent budget since the first check.
-      if (!s.usage.reserveAi(limits)) throw aiLimitReached(limits.maxAiRequestsPerDay);
-      for await (const event of provider.generateWithTools({
-        system,
-        messages: window.messages,
-        tools: providerTools,
-        maxIterations: limits.maxAgentIterations,
-        maxOutputTokens: limits.maxOutputTokens,
-        temperature: settings.temperature,
-        toolBudgetExhausted: () => executor.budgetExhausted(),
-        reserveNextStep: () => s.usage.reserveAi(limits),
-        signal: input.signal,
-      })) {
-        if (event.type === "text") {
-          text += event.delta;
-          yield { type: "text", delta: event.delta };
-        } else if (event.type === "tool-start") {
-          const activity: ToolActivity = {
-            id: event.id,
-            name: event.name,
-            label: toolLabel(executor.find(event.name), event.name, event.input),
-            status: "running",
-          };
-          tools.push(activity);
-          yield { type: "tool", tool: { ...activity } };
-        } else if (event.type === "tool-end") {
-          const activity = tools.find((t) => t.id === event.id);
-          if (activity) {
-            activity.status = event.error ? "error" : "success";
-            if (event.error) activity.error = event.error.slice(0, 300);
-            const approval = executor.approvalFor(event.id);
-            if (approval) activity.approval = approval;
-            yield { type: "tool", tool: { ...activity } };
+      // Provider candidates: primary selection + configured fallbacks
+      const primaryCandidate = {
+        provider: conversation.provider_override || settings.provider || "workers-ai",
+        model: conversation.model_override || settings.model,
+      };
+
+      const candidates: Array<{ provider: string; model: string }> = [primaryCandidate];
+      if (settings.autoFailover && settings.fallbacks?.length) {
+        for (const fb of settings.fallbacks) {
+          if (fb.provider !== primaryCandidate.provider || fb.model !== primaryCandidate.model) {
+            candidates.push(fb);
           }
-        } else if (event.type === "usage") {
-          s.usage.record(event.usage);
         }
       }
+
+      let streamedAnyText = false;
+      let lastError: unknown = null;
+
+      for (let i = 0; i < candidates.length; i++) {
+        const candidate = candidates[i]!;
+        let currentProvider: AIProvider | null = null;
+        try {
+          currentProvider = this.resolveProvider({
+            provider_override: candidate.provider,
+            model_override: candidate.model,
+          });
+        } catch (err) {
+          lastError = err;
+          continue;
+        }
+
+        if (!currentProvider) continue;
+
+        try {
+          if (!s.usage.reserveAi(limits)) throw aiLimitReached(limits.maxAiRequestsPerDay);
+
+          for await (const event of currentProvider.generateWithTools({
+            system,
+            messages: window.messages,
+            tools: providerTools,
+            maxIterations: limits.maxAgentIterations,
+            maxOutputTokens: limits.maxOutputTokens,
+            temperature: settings.temperature,
+            toolBudgetExhausted: () => executor.budgetExhausted(),
+            reserveNextStep: () => s.usage.reserveAi(limits),
+            signal: input.signal,
+          })) {
+            if (event.type === "text") {
+              streamedAnyText = true;
+              text += event.delta;
+              yield { type: "text", delta: event.delta };
+            } else if (event.type === "tool-start") {
+              const activity: ToolActivity = {
+                id: event.id,
+                name: event.name,
+                label: toolLabel(executor.find(event.name), event.name, event.input),
+                status: "running",
+              };
+              tools.push(activity);
+              yield { type: "tool", tool: { ...activity } };
+            } else if (event.type === "tool-end") {
+              const activity = tools.find((t) => t.id === event.id);
+              if (activity) {
+                activity.status = event.error ? "error" : "success";
+                if (event.error) activity.error = event.error.slice(0, 300);
+                const approval = executor.approvalFor(event.id);
+                if (approval) activity.approval = approval;
+                yield { type: "tool", tool: { ...activity } };
+              }
+            } else if (event.type === "usage") {
+              s.usage.record(event.usage);
+            }
+          }
+
+          // Successfully completed stream with this candidate!
+          lastError = null;
+          break;
+        } catch (err) {
+          lastError = err;
+          if (streamedAnyText || i === candidates.length - 1) {
+            throw err;
+          }
+
+          const next = candidates[i + 1]!;
+          const notice = `*[Notice: ${candidate.provider} quota/rate limit reached. Failing over to ${next.provider} (${next.model})...]*\n\n`;
+          yield { type: "text", delta: notice };
+          text += notice;
+        }
+      }
+
+      if (lastError) throw lastError;
+
       s.usage.increment({ tool_calls: executor.callCount });
 
       // Providers (like the AI SDK's streamText) may end the stream quietly on abort instead of throwing.

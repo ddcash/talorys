@@ -17,12 +17,26 @@ export function createAIProvider(
     return new CloudflareWorkersAIProvider(env.AI, model);
   }
 
-  const externalKey = settings.externalKeys?.[providerId as keyof typeof settings.externalKeys];
-  if (!externalKey) {
+  let credential = settings.externalKeys?.[providerId as keyof typeof settings.externalKeys];
+  let isOAuth = false;
+
+  if (providerId === "anthropic") {
+    if (settings.externalKeys?.anthropicOAuthToken) {
+      credential = settings.externalKeys.anthropicOAuthToken;
+      isOAuth = true;
+    }
+  } else if (providerId === "gemini") {
+    if (settings.externalKeys?.googleOAuthToken) {
+      credential = settings.externalKeys.googleOAuthToken;
+      isOAuth = true;
+    }
+  }
+
+  if (!credential) {
     throw new Error(
-      `API key for "${providerId}" is not configured. Add your API key in Settings -> AI & Models to use this provider.`,
+      `Credential (API Key or OAuth) for "${providerId}" is not configured. Configure it in Settings -> AI & Models to use this provider.`,
     );
   }
 
-  return new ExternalAIProvider(providerId as SupportedExternalProvider, model, externalKey);
+  return new ExternalAIProvider(providerId as SupportedExternalProvider, model, credential, isOAuth);
 }

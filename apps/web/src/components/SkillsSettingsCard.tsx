@@ -1,7 +1,8 @@
 import { useState } from "react";
 import type { Skill, SkillCategory } from "@talorys/shared";
-import { ChevronDown, ChevronUp, Cpu, Edit2, Plus, Sparkles, Trash2, Wrench } from "lucide-react";
+import { ChevronDown, ChevronUp, Cpu, Edit2, Layers, Plus, Sparkles, Trash2, Wrench } from "lucide-react";
 import { Badge, Button, Card, ConfirmDialog, Dialog, Input, Spinner, Switch } from "./ui";
+import { MarketplaceDialog } from "./MarketplaceDialog";
 import { keys, useApiMutation, useSkills } from "../hooks/queries";
 import { api } from "../lib/api";
 import { cn } from "../lib/utils";
@@ -51,6 +52,7 @@ const PRESET_SKILLS: Array<{
 
 export function SkillsSettingsCard() {
   const skills = useSkills();
+  const [showMarketplace, setShowMarketplace] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -128,6 +130,15 @@ export function SkillsSettingsCard() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowMarketplace(true)}
+            className="gap-1.5 text-xs border-accent/30 text-accent hover:bg-accent/10"
+          >
+            <Layers className="h-3.5 w-3.5" />
+            Marketplace
+          </Button>
           <Button
             size="sm"
             onClick={() =>
@@ -470,6 +481,12 @@ export function SkillsSettingsCard() {
         onCancel={() => setDeletingSkill(null)}
         onConfirm={() => deletingSkill && deleteSkill.mutate(deletingSkill.id)}
         loading={deleteSkill.isPending}
+      />
+
+      <MarketplaceDialog
+        open={showMarketplace}
+        onClose={() => setShowMarketplace(false)}
+        initialTab="skills"
       />
     </div>
   );

@@ -260,6 +260,12 @@ export const mcpTestSchema = z.object({
 export const llmProviderSchema = z.enum(["workers-ai", "anthropic", "openai", "openrouter", "gemini"]);
 export type LLMProviderId = z.infer<typeof llmProviderSchema>;
 
+export const fallbackProviderSchema = z.object({
+  provider: llmProviderSchema,
+  model: z.string().min(1).max(120),
+});
+export type FallbackProvider = z.infer<typeof fallbackProviderSchema>;
+
 export const externalKeysSchema = z.object({
   anthropic: z.string().optional(),
   openai: z.string().optional(),
@@ -267,8 +273,47 @@ export const externalKeysSchema = z.object({
   gemini: z.string().optional(),
   cloudflareToken: z.string().optional(),
   cloudflareAccountId: z.string().optional(),
+  anthropicOAuthToken: z.string().optional(),
+  googleOAuthToken: z.string().optional(),
+  googleRefreshToken: z.string().optional(),
 }).partial();
 export type ExternalKeys = z.infer<typeof externalKeysSchema>;
+
+// ---------- Marketplaces ----------
+
+export interface MarketplaceMcp {
+  id: string;
+  name: string;
+  author: string;
+  description: string;
+  category: "memory" | "search" | "developer" | "database" | "productivity" | "utility";
+  default_url: string;
+  needs_auth: boolean;
+  auth_hint?: string;
+  tags: string[];
+  documentation_url?: string;
+}
+
+export interface MarketplaceSkill {
+  id: string;
+  name: string;
+  author: string;
+  description: string;
+  category: SkillCategory;
+  instructions: string;
+  tools_json: string;
+  tags: string[];
+}
+
+export interface MarketplaceRule {
+  id: string;
+  title: string;
+  author: string;
+  description: string;
+  category: RuleCategory;
+  content: string;
+  tags: string[];
+}
 
 export const conversationUpdateSchema = z.object({
   title: shortText(120).optional(),
@@ -459,6 +504,8 @@ export const settingsSchema = z.object({
   /** Check the npm registry once a day for a newer Talorys release. */
   updateCheck: z.boolean(),
   externalKeys: externalKeysSchema.default({}),
+  fallbacks: z.array(fallbackProviderSchema).default([]),
+  autoFailover: z.boolean().default(true),
 });
 export type Settings = z.infer<typeof settingsSchema>;
 export const settingsUpdateSchema = settingsSchema
@@ -468,6 +515,8 @@ export const settingsUpdateSchema = settingsSchema
     limits: limitsSchema.partial().optional(),
     memoryHistory: memoryHistorySettingsSchema.partial().optional(),
     externalKeys: externalKeysSchema.partial().optional(),
+    fallbacks: z.array(fallbackProviderSchema).optional(),
+    autoFailover: z.boolean().optional(),
   });
 
 export const loginSchema = z.object({ password: z.string().min(1).max(256) });

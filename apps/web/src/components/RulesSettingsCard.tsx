@@ -1,10 +1,11 @@
 import { useState } from "react";
 import type { Rule, RuleCategory } from "@talorys/shared";
-import { BookOpen, Check, Edit2, Plus, Sparkles, Trash2, X } from "lucide-react";
+import { BookOpen, Check, Edit2, Layers, Plus, Sparkles, Trash2, X } from "lucide-react";
 import { Badge, Button, Card, ConfirmDialog, Dialog, Input, Spinner, Switch } from "./ui";
 import { keys, useApiMutation, useRules } from "../hooks/queries";
 import { api } from "../lib/api";
 import { cn } from "../lib/utils";
+import { MarketplaceDialog } from "./MarketplaceDialog";
 
 const CATEGORIES: { id: RuleCategory; label: string }[] = [
   { id: "general", label: "General" },
@@ -44,6 +45,7 @@ export function RulesSettingsCard() {
   const [search, setSearch] = useState("");
   const [editingRule, setEditingRule] = useState<Partial<Rule> | null>(null);
   const [deletingRule, setDeletingRule] = useState<Rule | null>(null);
+  const [showMarketplace, setShowMarketplace] = useState(false);
 
   const createRule = useApiMutation(
     (input: { title: string; content: string; category: RuleCategory; enabled?: boolean }) =>
@@ -109,6 +111,14 @@ export function RulesSettingsCard() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setShowMarketplace(true)}
+            className="border-accent/40 hover:bg-accent/10 text-accent font-medium"
+          >
+            <Layers className="h-4 w-4 mr-1.5" /> Marketplace
+          </Button>
           <Button
             size="sm"
             onClick={() =>
@@ -372,6 +382,12 @@ export function RulesSettingsCard() {
         onCancel={() => setDeletingRule(null)}
         onConfirm={() => deletingRule && deleteRule.mutate(deletingRule.id)}
         loading={deleteRule.isPending}
+      />
+
+      <MarketplaceDialog
+        open={showMarketplace}
+        onClose={() => setShowMarketplace(false)}
+        initialTab="rules"
       />
     </div>
   );

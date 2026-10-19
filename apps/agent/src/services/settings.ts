@@ -16,6 +16,8 @@ export const DEFAULT_SETTINGS: Settings = {
   memoryHistory: { ...DEFAULT_MEMORY_HISTORY },
   updateCheck: true,
   externalKeys: {},
+  fallbacks: [],
+  autoFailover: true,
 };
 
 const SETTINGS_KEY = "app.settings";
@@ -37,6 +39,8 @@ export class SettingsService {
       limits: { ...DEFAULT_SETTINGS.limits, ...(stored.limits ?? {}) },
       memoryHistory: { ...DEFAULT_SETTINGS.memoryHistory, ...(stored.memoryHistory ?? {}) },
       externalKeys: { ...DEFAULT_SETTINGS.externalKeys, ...(stored.externalKeys ?? {}) },
+      fallbacks: stored.fallbacks ?? DEFAULT_SETTINGS.fallbacks,
+      autoFailover: stored.autoFailover ?? DEFAULT_SETTINGS.autoFailover,
     };
     const parsed = settingsSchema.safeParse(merged);
     if (parsed.success) return parsed.data;
@@ -55,6 +59,8 @@ export class SettingsService {
       limits: { ...current.limits, ...stripUndefined(parsedPatch.data.limits ?? {}) },
       memoryHistory: { ...current.memoryHistory, ...stripUndefined(parsedPatch.data.memoryHistory ?? {}) },
       externalKeys: { ...current.externalKeys, ...stripUndefined(parsedPatch.data.externalKeys ?? {}) },
+      fallbacks: parsedPatch.data.fallbacks !== undefined ? parsedPatch.data.fallbacks : current.fallbacks,
+      autoFailover: parsedPatch.data.autoFailover !== undefined ? parsedPatch.data.autoFailover : current.autoFailover,
     };
     const parsed = settingsSchema.safeParse(next);
     if (!parsed.success) throw ValidationError.fromZod(parsedPatch.error ?? parsed.error);
