@@ -17,7 +17,16 @@ const GOOGLE_SCOPES = [
 oauthRoutes.get("/oauth/status", async (c) => {
   const s = c.env.agent.services;
   const current = s.settings.get();
-  const keys = current.externalKeys ?? {};
+  const keys = { ...current.externalKeys };
+
+  // Sanitize test client IDs if present
+  if (keys.googleClientId?.includes("test-client-id")) {
+    delete keys.googleClientId;
+    delete keys.googleClientSecret;
+    s.settings.update({ externalKeys: keys });
+  }
+
+  const validGoogleClientId = keys.googleClientId && !keys.googleClientId.includes("test-client-id");
 
   return c.json({
     google: {
@@ -25,8 +34,8 @@ oauthRoutes.get("/oauth/status", async (c) => {
       email: keys.googleUserEmail ?? null,
       hasRefreshToken: Boolean(keys.googleRefreshToken),
       tokenExpiry: keys.googleTokenExpiry ?? null,
-      hasClientConfig: Boolean(keys.googleClientId && keys.googleClientSecret),
-      clientId: keys.googleClientId ? `${keys.googleClientId.slice(0, 12)}...` : null,
+      hasClientConfig: Boolean(validGoogleClientId && keys.googleClientSecret),
+      clientId: validGoogleClientId ? `${keys.googleClientId!.slice(0, 16)}...` : null,
     },
     claude: {
       connected: Boolean(keys.anthropicOAuthToken),
@@ -53,17 +62,26 @@ oauthRoutes.post("/oauth/google/auth-url", async (c) => {
   const current = s.settings.get();
   const keys = { ...current.externalKeys };
 
-  const effectiveClientId = client_id || keys.googleClientId;
+  // Sanitize test client IDs
+  if (keys.googleClientId?.includes("test-client-id")) {
+    delete keys.googleClientId;
+    delete keys.googleClientSecret;
+  }
+
+  const effectiveClientId = (client_id && !client_id.includes("test-client-id"))
+    ? client_id.trim()
+    : (keys.googleClientId && !keys.googleClientId.includes("test-client-id") ? keys.googleClientId : undefined);
+
   if (!effectiveClientId) {
     return c.json(
-      { error: "Google OAuth Client ID is required. Please provide a Client ID from Google Cloud Console." },
+      { error: "Google OAuth Client ID is required. Please paste your Client ID from Google Cloud Console." },
       400,
     );
   }
 
-  // Save client_id and client_secret if provided
+  // Save client_id and client_secret if valid
   if (client_id || client_secret) {
-    if (client_id) keys.googleClientId = client_id.trim();
+    if (client_id && !client_id.includes("test-client-id")) keys.googleClientId = client_id.trim();
     if (client_secret) keys.googleClientSecret = client_secret.trim();
     s.settings.update({ externalKeys: keys });
   }

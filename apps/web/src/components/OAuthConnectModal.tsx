@@ -86,13 +86,22 @@ export function OAuthConnectModal({
 
   // Google: Launch Web OAuth Sign-in
   const handleStartGoogleOAuth = async () => {
+    if (!googleClientId.trim()) {
+      setGoogleValResult({
+        valid: false,
+        error: "Google OAuth Client ID is required. Please paste your Client ID from Google Cloud Console, or switch to the 'Instant CLI Token' tab above to connect immediately.",
+      });
+      return;
+    }
+
     try {
       setGoogleValidating(true);
+      setGoogleValResult(null);
       const res = await api<{ url: string }>("/oauth/google/auth-url", {
         method: "POST",
         body: {
           redirect_uri: redirectUri,
-          client_id: googleClientId.trim() || undefined,
+          client_id: googleClientId.trim(),
           client_secret: googleClientSecret.trim() || undefined,
         },
       });
@@ -293,17 +302,47 @@ export function OAuthConnectModal({
                   <p className="font-mono text-[10px] text-fg-subtle break-all bg-surface p-1.5 rounded border border-border">
                     {redirectUri}
                   </p>
-                  <p className="text-[10px] text-fg-subtle">
-                    Add this URI to your Google Cloud Console project under <em>Credentials &gt; OAuth 2.0 Web Client</em>.
-                  </p>
+                  <div className="text-[10px] text-fg-subtle space-y-1">
+                    <p>
+                      <strong>How to get your Client ID:</strong>
+                    </p>
+                    <ol className="list-decimal pl-4 space-y-0.5">
+                      <li>
+                        Go to{" "}
+                        <a
+                          href="https://console.cloud.google.com/apis/credentials"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-accent underline font-medium inline-flex items-center gap-0.5"
+                        >
+                          Google Cloud Console Credentials <ExternalLink className="h-2.5 w-2.5" />
+                        </a>
+                      </li>
+                      <li>Click <strong>Create Credentials &gt; OAuth client ID</strong></li>
+                      <li>Select Application type: <strong>Web application</strong></li>
+                      <li>Add the <strong>Authorized redirect URI</strong> copied above</li>
+                      <li>Copy your Client ID and Client Secret and paste below</li>
+                    </ol>
+                  </div>
                 </div>
+
+                {googleValResult?.error && (
+                  <div className="rounded-lg bg-danger/10 border border-danger/20 p-2.5 text-xs text-danger">
+                    {googleValResult.error}
+                  </div>
+                )}
 
                 <div className="space-y-2">
                   <div>
-                    <label className="text-xs font-medium text-fg">Google OAuth Client ID</label>
+                    <label className="text-xs font-medium text-fg flex items-center justify-between">
+                      <span>Google OAuth Client ID <span className="text-danger">*</span></span>
+                    </label>
                     <Input
                       value={googleClientId}
-                      onChange={(e) => setGoogleClientId(e.target.value)}
+                      onChange={(e) => {
+                        setGoogleClientId(e.target.value);
+                        if (googleValResult?.error) setGoogleValResult(null);
+                      }}
                       placeholder="e.g. 123456789-abc.apps.googleusercontent.com"
                       className="mt-1 font-mono text-xs"
                     />
@@ -323,10 +362,23 @@ export function OAuthConnectModal({
                 <Button
                   onClick={handleStartGoogleOAuth}
                   loading={googleValidating}
+                  disabled={!googleClientId.trim()}
                   className="w-full text-xs"
                 >
                   Sign in with Google / Antigravity
                 </Button>
+
+                <div className="rounded-lg bg-accent/5 border border-accent/20 p-2.5 text-[11px] text-fg-subtle">
+                  💡 <strong>Faster Alternative:</strong> Switch to the <strong>Instant CLI Token</strong> tab above to connect immediately without setting up a Google Cloud project, or grab a free API key from{" "}
+                  <a
+                    href="https://aistudio.google.com/app/apikey"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-accent underline font-medium"
+                  >
+                    Google AI Studio
+                  </a>.
+                </div>
               </div>
             )}
 
