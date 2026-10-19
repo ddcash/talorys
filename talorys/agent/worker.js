@@ -62294,11 +62294,17 @@ var projectCreateSchema = external_exports.object({
   status: external_exports.enum(PROJECT_STATUSES).optional().default("active")
 });
 var projectUpdateSchema = external_exports.object({ name: shortText(200), description: external_exports.string().max(5e3), status: external_exports.enum(PROJECT_STATUSES) }).partial();
-var conversationCreateSchema = external_exports.object({ title: external_exports.string().trim().max(200).optional() });
+var conversationCreateSchema = external_exports.object({
+  title: external_exports.string().trim().max(200).optional(),
+  provider_override: llmProviderSchema.nullable().optional(),
+  model_override: external_exports.string().max(120).nullable().optional()
+});
 var chatRequestSchema = external_exports.object({
   conversation_id: id.optional(),
   message: shortText(16e3),
-  retry: external_exports.boolean().optional()
+  retry: external_exports.boolean().optional(),
+  provider: llmProviderSchema.nullable().optional(),
+  model: external_exports.string().max(120).nullable().optional()
 });
 var automationCreateSchema = external_exports.object({
   name: shortText(200),
@@ -64204,15 +64210,26 @@ var ConversationRepository = class {
     if (!c) throw new NotFoundError("Conversation not found");
     return c;
   }
-  create(title = "New conversation") {
+  create(title = "New conversation", overrides) {
     const ts = now();
-    const c = { id: newId(), title, created_at: ts, updated_at: ts, summary: null, summary_upto: null, provider_override: null, model_override: null };
+    const c = {
+      id: newId(),
+      title,
+      created_at: ts,
+      updated_at: ts,
+      summary: null,
+      summary_upto: null,
+      provider_override: overrides?.provider ?? null,
+      model_override: overrides?.model ?? null
+    };
     this.db.run(
-      `INSERT INTO tal_conversations (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)`,
+      `INSERT INTO tal_conversations (id, title, created_at, updated_at, provider_override, model_override) VALUES (?, ?, ?, ?, ?, ?)`,
       c.id,
       c.title,
       c.created_at,
-      c.updated_at
+      c.updated_at,
+      c.provider_override,
+      c.model_override
     );
     return c;
   }
@@ -68365,8 +68382,16 @@ var AgentRunner = class {
       userMessage = prev;
     } else {
       if (!conversation) {
-        conversation = s2.conversations.create(titleFromMessage(input2.message));
+        conversation = s2.conversations.create(titleFromMessage(input2.message), {
+          provider: input2.provider,
+          model: input2.model
+        });
         yield { type: "title", conversation_id: conversation.id, title: conversation.title };
+      } else if (input2.provider !== void 0 || input2.model !== void 0) {
+        conversation = s2.conversations.updateOverrides(conversation.id, {
+          provider_override: input2.provider,
+          model_override: input2.model
+        });
       }
       userMessage = s2.conversations.addMessage({ conversation_id: conversation.id, role: "user", content: input2.message });
     }
@@ -70674,8 +70699,16 @@ chatRoutes.get("/conversations", (c) => {
   return c.json({ conversations: c.env.agent.services.conversations.list({ q }) });
 });
 chatRoutes.post("/conversations", async (c) => {
-  const { title } = await body(c, conversationCreateSchema);
-  return c.json({ conversation: c.env.agent.services.conversations.create(title || "New conversation") }, 201);
+  const { title, provider_override, model_override } = await body(c, conversationCreateSchema);
+  return c.json(
+    {
+      conversation: c.env.agent.services.conversations.create(title || "New conversation", {
+        provider: provider_override,
+        model: model_override
+      })
+    },
+    201
+  );
 });
 chatRoutes.get("/conversations/:id", (c) => {
   const s2 = c.env.agent.services;
@@ -70739,7 +70772,9 @@ data: ${JSON.stringify(event)}
         conversationId: input2.conversation_id,
         message: input2.message,
         retry: input2.retry,
-        signal: controller.signal
+        signal: controller.signal,
+        provider: input2.provider,
+        model: input2.model
       })) {
         if (event.type === "start") {
           conversationId = event.conversation_id;

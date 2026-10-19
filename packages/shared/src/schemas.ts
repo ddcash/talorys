@@ -475,12 +475,18 @@ export const projectUpdateSchema = z
   .object({ name: shortText(200), description: z.string().max(5000), status: z.enum(PROJECT_STATUSES) })
   .partial();
 
-export const conversationCreateSchema = z.object({ title: z.string().trim().max(200).optional() });
+export const conversationCreateSchema = z.object({
+  title: z.string().trim().max(200).optional(),
+  provider_override: llmProviderSchema.nullable().optional(),
+  model_override: z.string().max(120).nullable().optional(),
+});
 
 export const chatRequestSchema = z.object({
   conversation_id: id.optional(),
   message: shortText(16_000),
   retry: z.boolean().optional(),
+  provider: llmProviderSchema.nullable().optional(),
+  model: z.string().max(120).nullable().optional(),
 });
 
 export const automationCreateSchema = z.object({

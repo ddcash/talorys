@@ -15,6 +15,8 @@ export interface TurnInput {
   message: string;
   retry?: boolean;
   signal: AbortSignal;
+  provider?: string | null;
+  model?: string | null;
 }
 
 export function titleFromMessage(message: string): string {
@@ -97,8 +99,16 @@ export class AgentRunner {
       userMessage = prev;
     } else {
       if (!conversation) {
-        conversation = s.conversations.create(titleFromMessage(input.message));
+        conversation = s.conversations.create(titleFromMessage(input.message), {
+          provider: input.provider,
+          model: input.model,
+        });
         yield { type: "title", conversation_id: conversation.id, title: conversation.title };
+      } else if (input.provider !== undefined || input.model !== undefined) {
+        conversation = s.conversations.updateOverrides(conversation.id, {
+          provider_override: input.provider,
+          model_override: input.model,
+        });
       }
       userMessage = s.conversations.addMessage({ conversation_id: conversation.id, role: "user", content: input.message });
     }

@@ -274,4 +274,33 @@ Whenever upstream changes are merged, refer to this document to audit, preserve,
   - `apps/web/src/components/AiSettingsCard.tsx`: Complete Free AI Providers Directory with search, filters, inline config, and fallback optgroups.
   - `apps/web/src/pages/ChatPage.tsx`: Grouped provider options in conversation model switcher.
 
+---
+
+## 14. Per-Chat AI Model Selection & Instant Model Switching
+- **Status**: Active
+- **Description**: Full ability to choose and switch the AI model and provider for each chat independently — both when starting a new conversation and dynamically mid-conversation in existing chats.
+- **Key Capabilities**:
+  - **New Chat Model Pre-Selection**: Pick which model will answer before typing your first message. Starting a new chat (`/chat`) displays the active model switcher; any selected model is automatically saved as the conversation's model override on turn 1.
+  - **Dynamic Mid-Conversation Switching**: Change models on the fly in any existing conversation (e.g., start on Llama 3.3 for quick chatting, switch to Claude 3.7 Sonnet for complex coding, or switch to DeepSeek R1 for reasoning). Changes save immediately via `PATCH /conversations/:id` and apply to subsequent messages.
+  - **Dual-Access UI (Header & Composer Toolbar)**:
+    - **Header Pill Button**: Clickable model selector pill next to chat usage in the header (`ChatHeader`).
+    - **Composer Toolbar Button**: Clickable model badge directly inside the message input box container next to the send button (`Composer`), so you always see exactly which model is answering you.
+  - **1-Click Quick-Select Presets**: Grid of top popular models with instant 1-click selection:
+    - 🟣 **Claude 3.7 Sonnet** (`anthropic: claude-3-7-sonnet-20250219`)
+    - 🟣 **Claude 3.5 Sonnet** (`anthropic: claude-3-5-sonnet-20241022`)
+    - 🔵 **Gemini 2.0 Flash** (`gemini: gemini-2.0-flash`)
+    - 🔵 **Gemini 2.5 Pro** (`gemini: gemini-2.5-pro`)
+    - 🟠 **Workers AI Llama 3.3 70B** (`workers-ai: @cf/meta/llama-3.3-70b-instruct-fp8-fast`)
+    - 🟢 **DeepSeek R1 Distill** (`workers-ai: @cf/deepseek-ai/deepseek-r1-distill-qwen-32b`)
+    - 🟣 **Groq Llama 3.3 70B** (`groq: llama-3.3-70b-versatile`)
+    - 🌐 **FreeLLMAPI Auto Router** (`freellmapi: freellmapi/auto`)
+  - **Comprehensive 54-Provider Dropdown & Custom Model Input**: Switch between any of the 54 ecosystem providers or type custom model identifiers.
+  - **Reset to Default**: Easily revert any conversation override back to the global inherited default settings with one click.
+- **Files Touched**:
+  - `packages/shared/src/schemas.ts`: Updated `conversationCreateSchema` and `chatRequestSchema` with `provider` and `model` overrides.
+  - `apps/agent/src/db/repositories/conversations.ts`: Added overrides support in `create(title, overrides)`.
+  - `apps/agent/src/agent/runner.ts`: `TurnInput` supports `provider` and `model`, applying overrides during conversation creation and turn execution.
+  - `apps/agent/src/api/routes/chat.ts`: Passed `provider` and `model` in `POST /conversations` and `POST /chat`.
+  - `apps/web/src/lib/api.ts`: `streamChat` payload supports optional `provider` and `model`.
+  - `apps/web/src/pages/ChatPage.tsx`: Enhanced `ConversationModelSwitcher`, updated `ChatHeader` and `Composer` with per-chat model selection.
 

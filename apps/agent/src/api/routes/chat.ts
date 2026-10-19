@@ -14,8 +14,16 @@ chatRoutes.get("/conversations", (c) => {
 });
 
 chatRoutes.post("/conversations", async (c) => {
-  const { title } = await body(c, conversationCreateSchema);
-  return c.json({ conversation: c.env.agent.services.conversations.create(title || "New conversation") }, 201);
+  const { title, provider_override, model_override } = await body(c, conversationCreateSchema);
+  return c.json(
+    {
+      conversation: c.env.agent.services.conversations.create(title || "New conversation", {
+        provider: provider_override,
+        model: model_override,
+      }),
+    },
+    201,
+  );
 });
 
 chatRoutes.get("/conversations/:id", (c) => {
@@ -88,6 +96,8 @@ chatRoutes.post("/chat", async (c) => {
         message: input.message,
         retry: input.retry,
         signal: controller.signal,
+        provider: input.provider,
+        model: input.model,
       })) {
         if (event.type === "start") {
           conversationId = event.conversation_id;

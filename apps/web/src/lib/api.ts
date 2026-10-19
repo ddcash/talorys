@@ -54,7 +54,7 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
  * POSTs a chat message and consumes the Server-Sent Events response incrementally.
  */
 export async function streamChat(
-  payload: { conversation_id?: string; message: string; retry?: boolean },
+  payload: { conversation_id?: string; message: string; retry?: boolean; provider?: string | null; model?: string | null },
   onEvent: (event: ChatStreamEvent) => void,
   signal: AbortSignal,
 ): Promise<void> {

@@ -74,12 +74,26 @@ export class ConversationRepository {
     return c;
   }
 
-  create(title = "New conversation"): ConversationRecord {
+  create(title = "New conversation", overrides?: { provider?: string | null; model?: string | null }): ConversationRecord {
     const ts = now();
-    const c: ConversationRecord = { id: newId(), title, created_at: ts, updated_at: ts, summary: null, summary_upto: null, provider_override: null, model_override: null };
+    const c: ConversationRecord = {
+      id: newId(),
+      title,
+      created_at: ts,
+      updated_at: ts,
+      summary: null,
+      summary_upto: null,
+      provider_override: overrides?.provider ?? null,
+      model_override: overrides?.model ?? null,
+    };
     this.db.run(
-      `INSERT INTO tal_conversations (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)`,
-      c.id, c.title, c.created_at, c.updated_at,
+      `INSERT INTO tal_conversations (id, title, created_at, updated_at, provider_override, model_override) VALUES (?, ?, ?, ?, ?, ?)`,
+      c.id,
+      c.title,
+      c.created_at,
+      c.updated_at,
+      c.provider_override,
+      c.model_override,
     );
     return c;
   }

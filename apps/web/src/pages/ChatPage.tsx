@@ -9,6 +9,7 @@ import {
   Check,
   CheckCircle2,
   Copy,
+  ChevronDown,
   History,
   Loader2,
   MoreHorizontal,
@@ -56,6 +57,9 @@ export function ChatPage() {
   const conversation = useConversation(conversationId);
   const [stream, setStream] = useState<StreamState | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [newChatProvider, setNewChatProvider] = useState<string | null>(null);
+  const [newChatModel, setNewChatModel] = useState<string | null>(null);
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
@@ -79,6 +83,20 @@ export function ChatPage() {
     if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
   }, [messages.length, stream?.text, stream?.tools.length, stream?.error]);
 
+  const currentProvider = conversation.data?.conversation
+    ? (conversation.data.conversation.provider_override ?? settings.data?.provider ?? "workers-ai")
+    : (newChatProvider ?? settings.data?.provider ?? "workers-ai");
+
+  const currentModel = conversation.data?.conversation
+    ? (conversation.data.conversation.model_override ?? settings.data?.model ?? "@cf/meta/llama-3.3-70b-instruct-fp8-fast")
+    : (newChatModel ?? settings.data?.model ?? "@cf/meta/llama-3.3-70b-instruct-fp8-fast");
+
+  const isCustomModel = conversation.data?.conversation
+    ? Boolean(conversation.data.conversation.provider_override || conversation.data.conversation.model_override)
+    : Boolean(newChatProvider || newChatModel);
+
+  const activeModelDisplayName = getModelDisplayName(currentProvider, currentModel);
+
   async function send(text: string, opts: { retry?: boolean } = {}) {
     if (streaming) return;
     const controller = new AbortController();
@@ -94,7 +112,13 @@ export function ChatPage() {
     setStream({ conversationId: convId, userText: opts.retry ? "" : text, userMessageId: null, assistantId: null, text: "", tools: [], error: null, done: false });
     try {
       await streamChat(
-        { conversation_id: convId ?? undefined, message: opts.retry ? "retry" : text, retry: opts.retry },
+        {
+          conversation_id: convId ?? undefined,
+          message: opts.retry ? "retry" : text,
+          retry: opts.retry,
+          provider: !convId ? (newChatProvider ?? undefined) : undefined,
+          model: !convId ? (newChatModel ?? undefined) : undefined,
+        },
         (event) => {
           switch (event.type) {
             case "title":
@@ -175,6 +199,14 @@ export function ChatPage() {
           conversation={conversation.data?.conversation}
           onOpenHistory={() => setHistoryOpen(true)}
           onNew={() => navigate("/chat")}
+          newChatProvider={newChatProvider}
+          newChatModel={newChatModel}
+          onSelectNewChatModel={(p, m) => {
+            setNewChatProvider(p);
+            setNewChatModel(m);
+          }}
+          externalOpen={modelPickerOpen}
+          onOpenChange={setModelPickerOpen}
         />
 
         <div
@@ -224,7 +256,15 @@ export function ChatPage() {
           )}
         </div>
 
-        <Composer streaming={streaming || remoteStreaming} onSend={(t) => void send(t)} onStop={stop} autoFocus={showEmpty} />
+        <Composer
+          streaming={streaming || remoteStreaming}
+          onSend={(t) => void send(t)}
+          onStop={stop}
+          autoFocus={showEmpty}
+          activeModelName={activeModelDisplayName}
+          isCustomModel={isCustomModel}
+          onOpenModelPicker={() => setModelPickerOpen(true)}
+        />
       </section>
 
       <Dialog open={historyOpen} onClose={() => setHistoryOpen(false)} title="Conversations">
@@ -236,19 +276,135 @@ export function ChatPage() {
   );
 }
 
+const POPULAR_MODELS = [
+  {
+    name: "Claude 3.7 Sonnet",
+    provider: "anthropic",
+    model: "claude-3-7-sonnet-20250219",
+    badge: "Claude Pro / OAuth",
+    desc: "Top coding, reasoning & agents",
+    color: "border-amber-500/30 bg-amber-500/10 text-amber-500",
+  },
+  {
+    name: "Claude 3.5 Sonnet",
+    provider: "anthropic",
+    model: "claude-3-5-sonnet-20241022",
+    badge: "Claude Pro / OAuth",
+    desc: "Fast, reliable intelligence benchmark",
+    color: "border-amber-500/30 bg-amber-500/10 text-amber-500",
+  },
+  {
+    name: "Gemini 2.0 Flash",
+    provider: "gemini",
+    model: "gemini-2.0-flash",
+    badge: "Google / Antigravity",
+    desc: "Ultra-fast response with huge context",
+    color: "border-blue-500/30 bg-blue-500/10 text-blue-500",
+  },
+  {
+    name: "Gemini 2.5 Pro",
+    provider: "gemini",
+    model: "gemini-2.5-pro",
+    badge: "Google / Antigravity",
+    desc: "Advanced deep reasoning & multimodal",
+    color: "border-blue-500/30 bg-blue-500/10 text-blue-500",
+  },
+  {
+    name: "Llama 3.3 70B",
+    provider: "workers-ai",
+    model: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+    badge: "Cloudflare (Free)",
+    desc: "Native inference on Cloudflare global GPUs",
+    color: "border-orange-500/30 bg-orange-500/10 text-orange-500",
+  },
+  {
+    name: "DeepSeek R1 Distill",
+    provider: "workers-ai",
+    model: "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
+    badge: "Cloudflare (Free)",
+    desc: "Deep reasoning & chain-of-thought",
+    color: "border-emerald-500/30 bg-emerald-500/10 text-emerald-500",
+  },
+  {
+    name: "Groq Llama 3.3 70B",
+    provider: "groq",
+    model: "llama-3.3-70b-versatile",
+    badge: "Groq LPU Free",
+    desc: "Blazing ~300 tokens/sec speed",
+    color: "border-purple-500/30 bg-purple-500/10 text-purple-500",
+  },
+  {
+    name: "FreeLLMAPI Auto",
+    provider: "freellmapi",
+    model: "freellmapi/auto",
+    badge: "635 Free Models",
+    desc: "Automatic failover across 34 free providers",
+    color: "border-cyan-500/30 bg-cyan-500/10 text-cyan-500",
+  },
+];
+
+function getModelDisplayName(providerId?: string | null, modelId?: string | null): string {
+  if (!modelId) return "Default Model";
+  if (modelId.includes("claude-3-7-sonnet")) return "Claude 3.7 Sonnet";
+  if (modelId.includes("claude-3-5-sonnet")) return "Claude 3.5 Sonnet";
+  if (modelId.includes("claude-3-5-haiku")) return "Claude 3.5 Haiku";
+  if (modelId.includes("gemini-2.5-pro")) return "Gemini 2.5 Pro";
+  if (modelId.includes("gemini-2.0-flash")) return "Gemini 2.0 Flash";
+  if (modelId.includes("gemini-1.5-pro")) return "Gemini 1.5 Pro";
+  if (modelId.includes("llama-3.3-70b")) return "Llama 3.3 70B";
+  if (modelId.includes("deepseek-r1-distill-qwen-32b")) return "DeepSeek R1 (32B)";
+  if (modelId.includes("deepseek-r1-distill-llama-70b")) return "DeepSeek R1 (70B)";
+  if (modelId.includes("qwen2.5-coder")) return "Qwen 2.5 Coder";
+  if (modelId.includes("freellmapi/auto")) return "FreeLLMAPI Auto";
+  if (modelId.includes("gpt-4o-mini")) return "GPT-4o Mini";
+  if (modelId.includes("gpt-4o")) return "GPT-4o";
+  const name = modelId.split("/").pop() ?? modelId;
+  return name.length > 25 ? `${name.slice(0, 22)}...` : name;
+}
+
 function ConversationModelSwitcher({
   conversation,
+  newChatProvider,
+  newChatModel,
+  onSelectNewChatModel,
+  externalOpen,
+  onOpenChange,
 }: {
   conversation?: Conversation;
+  newChatProvider?: string | null;
+  newChatModel?: string | null;
+  onSelectNewChatModel?: (provider: string | null, model: string | null) => void;
+  externalOpen?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const settings = useSettings();
-  const [open, setOpen] = useState(false);
-  const activeProvider = conversation?.provider_override ?? settings.data?.provider ?? "cloudflare";
-  const activeModel = conversation?.model_override ?? settings.data?.model ?? "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
-  const isOverridden = Boolean(conversation?.provider_override || conversation?.model_override);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = externalOpen !== undefined ? externalOpen : internalOpen;
+  const setOpen = (o: boolean) => {
+    setInternalOpen(o);
+    onOpenChange?.(o);
+  };
 
-  const [provider, setProvider] = useState<string>(conversation?.provider_override ?? "");
-  const [model, setModel] = useState<string>(conversation?.model_override ?? "");
+  const activeProvider = conversation
+    ? (conversation.provider_override ?? settings.data?.provider ?? "workers-ai")
+    : (newChatProvider ?? settings.data?.provider ?? "workers-ai");
+  const activeModel = conversation
+    ? (conversation.model_override ?? settings.data?.model ?? "@cf/meta/llama-3.3-70b-instruct-fp8-fast")
+    : (newChatModel ?? settings.data?.model ?? "@cf/meta/llama-3.3-70b-instruct-fp8-fast");
+  const isOverridden = conversation
+    ? Boolean(conversation.provider_override || conversation.model_override)
+    : Boolean(newChatProvider || newChatModel);
+
+  const [provider, setProvider] = useState<string>(activeProvider);
+  const [model, setModel] = useState<string>(activeModel);
+  const [activeTab, setActiveTab] = useState<"quick" | "all">("quick");
+
+  useEffect(() => {
+    if (open) {
+      setProvider(activeProvider);
+      setModel(activeModel);
+    }
+  }, [open, activeProvider, activeModel]);
 
   const update = useApiMutation(
     (input: { provider_override: string | null; model_override: string | null }) =>
@@ -258,157 +414,248 @@ function ConversationModelSwitcher({
       }),
     {
       invalidate: [["conversation", conversation?.id ?? ""], ["conversations"]],
-      success: "Conversation model updated",
+      success: "Chat model updated",
       onSuccess: () => setOpen(false),
     },
   );
 
-  if (!conversation) return null;
+  const handleApply = (targetProvider?: string, targetModel?: string) => {
+    const p = targetProvider !== undefined ? targetProvider : provider;
+    const m = targetModel !== undefined ? targetModel : model;
 
-  const shortModel = activeModel.split("/").pop() ?? activeModel;
+    if (conversation) {
+      update.mutate({
+        provider_override: p ? (p as any) : null,
+        model_override: m ? m.trim() : null,
+      });
+    } else {
+      onSelectNewChatModel?.(p || null, m ? m.trim() : null);
+      setOpen(false);
+    }
+  };
+
+  const handleReset = () => {
+    if (conversation) {
+      update.mutate({ provider_override: null, model_override: null });
+    } else {
+      onSelectNewChatModel?.(null, null);
+      setOpen(false);
+    }
+  };
+
+  const shortModel = getModelDisplayName(activeProvider, activeModel);
 
   return (
     <>
       <button
         type="button"
-        onClick={() => {
-          setProvider(conversation.provider_override ?? "");
-          setModel(conversation.model_override ?? "");
-          setOpen(true);
-        }}
+        onClick={() => setOpen(true)}
         className={cn(
           "inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-xs transition-colors",
           isOverridden
-            ? "border-accent/40 bg-accent/10 text-accent font-medium"
+            ? "border-accent/40 bg-accent/10 text-accent font-medium hover:bg-accent/15"
             : "border-border bg-subtle text-fg-muted hover:text-fg hover:border-border-strong"
         )}
-        title="Change model or LLM provider for this conversation"
+        title="Select AI model for this chat"
       >
-        <Sparkles className="h-3 w-3 shrink-0" />
-        <span className="max-w-[120px] truncate sm:max-w-[160px]">{shortModel}</span>
-        {isOverridden && <span className="text-[10px] opacity-75">(custom)</span>}
+        <Sparkles className="h-3 w-3 shrink-0 text-accent" />
+        <span className="max-w-[120px] truncate sm:max-w-[160px] font-medium">{shortModel}</span>
+        {isOverridden && <span className="text-[10px] opacity-75">(override)</span>}
+        <ChevronDown className="h-3 w-3 opacity-60" />
       </button>
 
       <Dialog
         open={open}
         onClose={() => setOpen(false)}
-        title="Conversation Model Override"
+        title="Select AI Model for this Chat"
+        wide
         footer={
           <>
             {isOverridden && (
               <Button
                 variant="ghost"
-                className="text-danger hover:text-danger mr-auto"
-                onClick={() => update.mutate({ provider_override: null, model_override: null })}
+                className="text-danger hover:text-danger mr-auto text-xs"
+                onClick={handleReset}
                 loading={update.isPending}
               >
-                Reset to Default
+                Reset to Default ({getModelDisplayName(settings.data?.provider, settings.data?.model)})
               </Button>
             )}
             <Button variant="ghost" onClick={() => setOpen(false)}>
               Cancel
             </Button>
             <Button
-              onClick={() =>
-                update.mutate({
-                  provider_override: provider ? (provider as any) : null,
-                  model_override: model ? model.trim() : null,
-                })
-              }
+              onClick={() => handleApply()}
               loading={update.isPending}
             >
-              Apply
+              Apply to this Chat
             </Button>
           </>
         }
       >
         <div className="space-y-4">
-          <p className="text-xs text-fg-muted">
-            Override the LLM provider and model specifically for this conversation. Leave blank to inherit your default settings ({settings.data?.provider ?? "cloudflare"}: {settings.data?.model}).
-          </p>
-          <div>
-            <label className="text-xs font-medium text-fg-subtle">Provider</label>
-            <select
-              value={provider}
-              onChange={(e) => {
-                const p = e.target.value;
-                setProvider(p);
-                const cat = FREE_LLM_PROVIDERS.find((cp) => cp.id === p);
-                if (cat) {
-                  setModel(cat.defaultModel);
-                  return;
-                }
-                if (p === "workers-ai") setModel("@cf/meta/llama-3.3-70b-instruct-fp8-fast");
-                else if (p === "anthropic") setModel("claude-3-7-sonnet-20250219");
-                else if (p === "openai") setModel("gpt-4o");
-                else if (p === "openrouter") setModel("anthropic/claude-3.7-sonnet");
-                else if (p === "gemini") setModel("gemini-2.0-flash");
-                else if (p === "freellmapi") setModel("freellmapi/auto");
-                else if (p === "groq") setModel("llama-3.3-70b-versatile");
-                else if (p === "cerebras") setModel("llama-3.3-70b");
-                else if (p === "mistral") setModel("mistral-small-latest");
-                else setModel("");
-              }}
-              className="mt-1 block w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-fg focus:border-accent focus:outline-none"
-            >
-              <option value="">Inherit Default ({settings.data?.provider ?? "workers-ai"})</option>
-              <optgroup label="Core Platforms & Gateways">
-                <option value="workers-ai">Cloudflare Workers AI</option>
-                <option value="freellmapi">FreeLLMAPI Gateway (635 Free Models)</option>
-                <option value="groq">Groq LPUs (Free Ultra-Fast)</option>
-                <option value="cerebras">Cerebras (Free 2,100 T/s)</option>
-                <option value="mistral">Mistral AI (Free Tier)</option>
-                <option value="gemini">Google / Antigravity</option>
-                <option value="anthropic">Anthropic Claude</option>
-                <option value="openai">OpenAI</option>
-                <option value="openrouter">OpenRouter</option>
-              </optgroup>
-              <optgroup label="Zero-Key Free (100% Free / Instant)">
-                {FREE_LLM_PROVIDERS.filter((p) => p.category === "no-key-free").map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} (Zero Key)
-                  </option>
-                ))}
-              </optgroup>
-              <optgroup label="High-Performance Free Tiers">
-                {FREE_LLM_PROVIDERS.filter((p) => p.category === "high-performance" && !["workers-ai", "groq", "cerebras", "mistral"].includes(p.id)).map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </optgroup>
-              <optgroup label="Community Free Routers">
-                {FREE_LLM_PROVIDERS.filter((p) => p.category === "credit-router" && !["freellmapi", "openrouter"].includes(p.id)).map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </optgroup>
-              <optgroup label="Developer Free-Key Gateways">
-                {FREE_LLM_PROVIDERS.filter((p) => p.category === "developer-free").map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </optgroup>
-              <optgroup label="Regional Free Tiers">
-                {FREE_LLM_PROVIDERS.filter((p) => p.category === "regional").map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </optgroup>
-            </select>
+          <div className="flex items-center justify-between border-b border-border pb-3">
+            <div>
+              <p className="text-xs text-fg-muted">
+                Choose the model used for this specific chat. Changes take effect on your next message.
+              </p>
+              <div className="flex items-center gap-2 mt-1 text-[11px] text-fg-subtle">
+                <span>Active: <strong className="text-fg">{shortModel}</strong></span>
+                <span>•</span>
+                <span>Default: {getModelDisplayName(settings.data?.provider, settings.data?.model)}</span>
+              </div>
+            </div>
+            <div className="flex rounded-lg border border-border bg-subtle p-0.5 text-xs shrink-0">
+              <button
+                type="button"
+                onClick={() => setActiveTab("quick")}
+                className={cn(
+                  "px-2.5 py-1 rounded-md transition-all font-medium",
+                  activeTab === "quick" ? "bg-surface text-fg shadow-xs" : "text-fg-subtle hover:text-fg"
+                )}
+              >
+                Popular Models
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("all")}
+                className={cn(
+                  "px-2.5 py-1 rounded-md transition-all font-medium",
+                  activeTab === "all" ? "bg-surface text-fg shadow-xs" : "text-fg-subtle hover:text-fg"
+                )}
+              >
+                All Providers &amp; Custom
+              </button>
+            </div>
           </div>
-          <div>
-            <label className="text-xs font-medium text-fg-subtle">Model ID</label>
-            <Input
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              placeholder="e.g. claude-3-7-sonnet-20250219 or @cf/meta/..."
-              className="mt-1 font-mono text-xs"
-            />
-          </div>
+
+          {activeTab === "quick" && (
+            <div className="space-y-2.5">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-fg-subtle">
+                1-Click Quick Select
+              </span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {POPULAR_MODELS.map((pm) => {
+                  const isCurrent = activeProvider === pm.provider && activeModel === pm.model;
+                  return (
+                    <button
+                      key={pm.model}
+                      type="button"
+                      onClick={() => handleApply(pm.provider, pm.model)}
+                      className={cn(
+                        "flex flex-col text-left p-3 rounded-xl border transition-all text-xs relative",
+                        isCurrent
+                          ? "border-accent bg-accent/10 shadow-xs ring-1 ring-accent"
+                          : "border-border bg-surface hover:border-border-strong hover:bg-subtle"
+                      )}
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <span className="font-semibold text-fg flex items-center gap-1.5">
+                          {pm.name}
+                          {isCurrent && <CheckCircle2 className="h-3.5 w-3.5 text-accent shrink-0" />}
+                        </span>
+                        <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full font-medium border", pm.color)}>
+                          {pm.badge}
+                        </span>
+                      </div>
+                      <span className="text-[11px] text-fg-subtle mt-1 leading-relaxed">
+                        {pm.desc}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {activeTab === "all" && (
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-medium text-fg-subtle">AI Provider</label>
+                <select
+                  value={provider}
+                  onChange={(e) => {
+                    const p = e.target.value;
+                    setProvider(p);
+                    const cat = FREE_LLM_PROVIDERS.find((cp) => cp.id === p);
+                    if (cat) {
+                      setModel(cat.defaultModel);
+                      return;
+                    }
+                    if (p === "workers-ai") setModel("@cf/meta/llama-3.3-70b-instruct-fp8-fast");
+                    else if (p === "anthropic") setModel("claude-3-7-sonnet-20250219");
+                    else if (p === "openai") setModel("gpt-4o");
+                    else if (p === "openrouter") setModel("anthropic/claude-3.7-sonnet");
+                    else if (p === "gemini") setModel("gemini-2.0-flash");
+                    else if (p === "freellmapi") setModel("freellmapi/auto");
+                    else if (p === "groq") setModel("llama-3.3-70b-versatile");
+                    else if (p === "cerebras") setModel("llama-3.3-70b");
+                    else if (p === "mistral") setModel("mistral-small-latest");
+                    else setModel("");
+                  }}
+                  className="mt-1 block w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-fg focus:border-accent focus:outline-none"
+                >
+                  <option value="">Inherit Default ({settings.data?.provider ?? "workers-ai"})</option>
+                  <optgroup label="Core Platforms & Gateways">
+                    <option value="workers-ai">Cloudflare Workers AI</option>
+                    <option value="anthropic">Anthropic Claude (Supports Claude Pro OAuth)</option>
+                    <option value="gemini">Google / Antigravity (Supports OAuth)</option>
+                    <option value="freellmapi">FreeLLMAPI Gateway (635 Free Models)</option>
+                    <option value="groq">Groq LPUs (Free Ultra-Fast)</option>
+                    <option value="cerebras">Cerebras (Free 2,100 T/s)</option>
+                    <option value="mistral">Mistral AI (Free Tier)</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="openrouter">OpenRouter</option>
+                  </optgroup>
+                  <optgroup label="Zero-Key Free (100% Free / Instant)">
+                    {FREE_LLM_PROVIDERS.filter((p) => p.category === "no-key-free").map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} (Zero Key)
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="High-Performance Free Tiers">
+                    {FREE_LLM_PROVIDERS.filter((p) => p.category === "high-performance" && !["workers-ai", "groq", "cerebras", "mistral"].includes(p.id)).map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Community Free Routers">
+                    {FREE_LLM_PROVIDERS.filter((p) => p.category === "credit-router" && !["freellmapi", "openrouter"].includes(p.id)).map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Developer Free-Key Gateways">
+                    {FREE_LLM_PROVIDERS.filter((p) => p.category === "developer-free").map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Regional Free Tiers">
+                    {FREE_LLM_PROVIDERS.filter((p) => p.category === "regional").map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-fg-subtle">Model ID</label>
+                <Input
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  placeholder="e.g. claude-3-7-sonnet-20250219 or @cf/meta/..."
+                  className="mt-1 font-mono text-xs"
+                />
+              </div>
+            </div>
+          )}
         </div>
       </Dialog>
     </>
@@ -419,10 +666,20 @@ function ChatHeader({
   conversation,
   onOpenHistory,
   onNew,
+  newChatProvider,
+  newChatModel,
+  onSelectNewChatModel,
+  externalOpen,
+  onOpenChange,
 }: {
   conversation?: Conversation;
   onOpenHistory: () => void;
   onNew: () => void;
+  newChatProvider: string | null;
+  newChatModel: string | null;
+  onSelectNewChatModel: (provider: string | null, model: string | null) => void;
+  externalOpen?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   return (
     <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border px-3 md:px-4">
@@ -433,7 +690,14 @@ function ChatHeader({
         <h2 className="truncate text-sm font-medium text-fg">{conversation?.title ?? "New conversation"}</h2>
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
-        <ConversationModelSwitcher conversation={conversation} />
+        <ConversationModelSwitcher
+          conversation={conversation}
+          newChatProvider={newChatProvider}
+          newChatModel={newChatModel}
+          onSelectNewChatModel={onSelectNewChatModel}
+          externalOpen={externalOpen}
+          onOpenChange={onOpenChange}
+        />
         <ChatUsage />
         <Button variant="ghost" size="sm" onClick={onNew}>
           <Plus className="h-4 w-4" />
@@ -750,7 +1014,23 @@ function AssistantBubble({
   );
 }
 
-function Composer({ streaming, onSend, onStop, autoFocus }: { streaming: boolean; onSend: (t: string) => void; onStop: () => void; autoFocus?: boolean }) {
+function Composer({
+  streaming,
+  onSend,
+  onStop,
+  autoFocus,
+  activeModelName,
+  isCustomModel,
+  onOpenModelPicker,
+}: {
+  streaming: boolean;
+  onSend: (t: string) => void;
+  onStop: () => void;
+  autoFocus?: boolean;
+  activeModelName?: string;
+  isCustomModel?: boolean;
+  onOpenModelPicker?: () => void;
+}) {
   const [value, setValue] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
   useLayoutEffect(() => {
@@ -775,7 +1055,7 @@ function Composer({ streaming, onSend, onStop, autoFocus }: { streaming: boolean
 
   return (
     <div className="chat-composer shrink-0 border-t border-border bg-bg px-3 pb-[calc(env(safe-area-inset-bottom)+4.5rem)] pt-3 md:px-6 md:pb-5">
-      <div className="mx-auto flex w-full max-w-3xl items-end gap-2 rounded-2xl border border-border bg-surface p-2 shadow-sm focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/15">
+      <div className="mx-auto flex w-full max-w-3xl flex-col rounded-2xl border border-border bg-surface p-2 shadow-sm focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/15">
         <textarea
           ref={ref}
           rows={1}
@@ -786,17 +1066,39 @@ function Composer({ streaming, onSend, onStop, autoFocus }: { streaming: boolean
           maxLength={16000}
           placeholder="Ask Talorys anything…"
           aria-label="Message"
-          className="max-h-[200px] min-h-[40px] flex-1 resize-none bg-transparent px-2 py-2 text-[15px] leading-6 placeholder:text-fg-subtle focus:outline-none"
+          className="max-h-[200px] min-h-[40px] w-full resize-none bg-transparent px-2 py-1.5 text-[15px] leading-6 placeholder:text-fg-subtle focus:outline-none"
         />
-        {streaming ? (
-          <Button variant="secondary" size="icon" onClick={onStop} aria-label="Stop generating" className="rounded-xl">
-            <Square className="h-3.5 w-3.5 fill-current" />
-          </Button>
-        ) : (
-          <Button size="icon" onClick={submit} disabled={!value.trim()} aria-label="Send message" className="rounded-xl">
-            <ArrowUp className="h-4 w-4" />
-          </Button>
-        )}
+        <div className="flex items-center justify-between pt-1">
+          {onOpenModelPicker && activeModelName ? (
+            <button
+              type="button"
+              onClick={onOpenModelPicker}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-colors",
+                isCustomModel
+                  ? "bg-accent/10 text-accent font-medium hover:bg-accent/15"
+                  : "text-fg-subtle hover:text-fg hover:bg-muted/60"
+              )}
+              title="Click to select model for this chat"
+            >
+              <Sparkles className="h-3 w-3 text-accent shrink-0" />
+              <span className="max-w-[180px] sm:max-w-[240px] truncate">{activeModelName}</span>
+              <ChevronDown className="h-3 w-3 opacity-60" />
+            </button>
+          ) : <div />}
+
+          <div className="flex items-center gap-1">
+            {streaming ? (
+              <Button variant="secondary" size="icon" onClick={onStop} aria-label="Stop generating" className="rounded-xl h-8 w-8">
+                <Square className="h-3.5 w-3.5 fill-current" />
+              </Button>
+            ) : (
+              <Button size="icon" onClick={submit} disabled={!value.trim()} aria-label="Send message" className="rounded-xl h-8 w-8">
+                <ArrowUp className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+        </div>
       </div>
       <p className="mx-auto mt-2 hidden max-w-3xl text-center text-[11px] text-fg-subtle md:block">
         Runs on your Cloudflare account. Talorys can make mistakes — check important details.
