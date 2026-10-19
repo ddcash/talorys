@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { FallbackProvider, LLMProviderId, Limits, Settings } from "@talorys/shared";
+import type { AiBudget, ExternalKeys, FallbackProvider, LLMProviderId, Limits, Settings } from "@talorys/shared";
 import { LIMIT_CEILINGS } from "@talorys/shared";
 import {
   ArrowDown,
@@ -8,14 +8,18 @@ import {
   Check,
   ChevronDown,
   Cloud,
+  DollarSign,
   ExternalLink,
   Eye,
   EyeOff,
+  Globe,
   Key,
   Lock,
   Plus,
   RefreshCw,
   Search,
+  Shield,
+  ShieldAlert,
   ShieldCheck,
   Sparkles,
   Trash2,
@@ -35,13 +39,14 @@ interface ProviderDef {
   name: string;
   badge: string;
   description: string;
-  keyName?: "anthropic" | "openai" | "openrouter" | "gemini";
+  keyName?: keyof ExternalKeys;
   keyLabel?: string;
   keyPlaceholder?: string;
   docsUrl?: string;
   supportsOAuth?: boolean;
   oauthLabel?: string;
   oauthHint?: string;
+  isFreeGateway?: boolean;
 }
 
 const DEFAULT_PROVIDER_INFO: ProviderDef = {
@@ -53,6 +58,47 @@ const DEFAULT_PROVIDER_INFO: ProviderDef = {
 
 const PROVIDERS: ProviderDef[] = [
   DEFAULT_PROVIDER_INFO,
+  {
+    id: "freellmapi",
+    name: "FreeLLMAPI Gateway",
+    badge: "34 Free Providers / 635 Models",
+    description: "OpenAI-compatible aggregator proxy routing across 34 free LLM providers with automatic smart failover.",
+    keyName: "freellmapiKey",
+    keyLabel: "FreeLLMAPI Bearer Key (Optional)",
+    keyPlaceholder: "freellmapi-... (leave empty if unauthenticated)",
+    docsUrl: "https://github.com/tashfeenahmed/freellmapi",
+    isFreeGateway: true,
+  },
+  {
+    id: "groq",
+    name: "Groq LPUs",
+    badge: "Free Ultra-Fast (250-800 T/s)",
+    description: "Lightning-fast inference on Llama 3.3 70B & Mixtral with generous free tier allowances.",
+    keyName: "groqKey",
+    keyLabel: "Groq API Key",
+    keyPlaceholder: "gsk_...",
+    docsUrl: "https://console.groq.com/keys",
+  },
+  {
+    id: "cerebras",
+    name: "Cerebras Wafer-Scale",
+    badge: "Free World-Record Speed (2,100 T/s)",
+    description: "Incredible 2,100+ tokens/sec on Llama 3.3 70B with high free limits.",
+    keyName: "cerebrasKey",
+    keyLabel: "Cerebras API Key",
+    keyPlaceholder: "csk-...",
+    docsUrl: "https://cloud.cerebras.ai",
+  },
+  {
+    id: "mistral",
+    name: "Mistral AI",
+    badge: "Free La Plateforme",
+    description: "European open weights models with free tier access to Mistral Small and Codestral 22B.",
+    keyName: "mistralKey",
+    keyLabel: "Mistral API Key",
+    keyPlaceholder: "mis_...",
+    docsUrl: "https://console.mistral.ai/api-keys/",
+  },
   {
     id: "anthropic",
     name: "Anthropic Claude",
@@ -92,8 +138,8 @@ const PROVIDERS: ProviderDef[] = [
   {
     id: "openrouter",
     name: "OpenRouter",
-    badge: "Unified Gateway",
-    description: "Access any model across Anthropic, OpenAI, Meta, DeepSeek, and Mistral through a single key.",
+    badge: "Unified Gateway & Free Models",
+    description: "Access any model across Anthropic, DeepSeek, Meta, and hundreds of free ':free' community endpoints.",
     keyName: "openrouter",
     keyLabel: "OpenRouter API Key",
     keyPlaceholder: "sk-or-v1-...",
@@ -142,8 +188,20 @@ export function AiSettingsCard({
   // Multi-Provider Failover State
   const [fallbacks, setFallbacks] = useState<FallbackProvider[]>(settings.fallbacks ?? []);
   const [autoFailover, setAutoFailover] = useState<boolean>(settings.autoFailover ?? true);
-  const [newFallbackProvider, setNewFallbackProvider] = useState<LLMProviderId>("workers-ai");
-  const [newFallbackModel, setNewFallbackModel] = useState<string>("@cf/meta/llama-3.3-70b-instruct-fp8-fast");
+  const [newFallbackProvider, setNewFallbackProvider] = useState<LLMProviderId>("freellmapi");
+  const [newFallbackModel, setNewFallbackModel] = useState<string>("freellmapi/auto");
+
+  // AI Usage Budget State
+  const [budget, setBudget] = useState<AiBudget>(
+    settings.budget ?? {
+      enabled: true,
+      maxDailyRequests: 100,
+      maxDailyTokens: 500000,
+      maxMonthlyCostUsd: 0.0,
+      failoverOnBudget: true,
+      freeTierOnly: false,
+    }
+  );
 
   // Dynamic Models queries
   const cfModels = useCloudflareModels();
@@ -157,6 +215,22 @@ export function AiSettingsCard({
     setProvider(newProvider);
     if (newProvider === "workers-ai") {
       if (!model.startsWith("@cf/")) setModel("@cf/meta/llama-3.3-70b-instruct-fp8-fast");
+    } else if (newProvider === "freellmapi") {
+      if (!model.startsWith("freellmapi/") && !model.includes("gemini") && !model.includes("llama")) {
+        setModel("freellmapi/auto");
+      }
+    } else if (newProvider === "groq") {
+      if (!model.startsWith("llama-") && !model.startsWith("mixtral-")) {
+        setModel("llama-3.3-70b-versatile");
+      }
+    } else if (newProvider === "cerebras") {
+      if (!model.startsWith("llama-")) {
+        setModel("llama-3.3-70b");
+      }
+    } else if (newProvider === "mistral") {
+      if (!model.startsWith("mistral-") && !model.startsWith("codestral-")) {
+        setModel("mistral-small-latest");
+      }
     } else if (newProvider === "anthropic") {
       if (!model.startsWith("claude-")) setModel("claude-3-7-sonnet-20250219");
     } else if (newProvider === "openai") {
@@ -203,6 +277,7 @@ export function AiSettingsCard({
       externalKeys,
       fallbacks,
       autoFailover,
+      budget,
     });
   };
 
@@ -213,7 +288,8 @@ export function AiSettingsCard({
     JSON.stringify(limits) !== JSON.stringify(settings.limits) ||
     JSON.stringify(externalKeys) !== JSON.stringify(settings.externalKeys ?? {}) ||
     JSON.stringify(fallbacks) !== JSON.stringify(settings.fallbacks ?? []) ||
-    autoFailover !== (settings.autoFailover ?? true);
+    autoFailover !== (settings.autoFailover ?? true) ||
+    JSON.stringify(budget) !== JSON.stringify(settings.budget ?? {});
 
   const availableCfModels = cfModels.data?.models ?? [];
   const filteredCfModels = availableCfModels.filter((m) => {
@@ -230,7 +306,7 @@ export function AiSettingsCard({
       {/* Provider Selector Tabs */}
       <section className="space-y-2">
         <h2 className="px-1 text-xs font-medium uppercase tracking-wider text-fg-subtle">
-          Primary AI Provider & Engine
+          Primary AI Provider &amp; Engine
         </h2>
         <Card className="p-4">
           <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3">
@@ -397,8 +473,105 @@ export function AiSettingsCard({
             </div>
           )}
 
-          {/* External Provider (Anthropic, OpenAI, OpenRouter, Gemini) */}
-          {provider !== "workers-ai" && (
+          {/* Provider is FreeLLMAPI */}
+          {provider === "freellmapi" && (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-border bg-subtle p-3 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-semibold text-fg flex items-center gap-1.5">
+                      <Globe className="h-4 w-4 text-accent" />
+                      FreeLLMAPI Connection Configuration
+                    </span>
+                    <p className="text-[11px] text-fg-subtle mt-0.5">
+                      Connect to your local or hosted FreeLLMAPI proxy aggregating 34 free providers &amp; 635 models.
+                    </p>
+                  </div>
+                  <a
+                    href="https://github.com/tashfeenahmed/freellmapi"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-accent hover:underline flex items-center gap-1"
+                  >
+                    FreeLLMAPI Docs <ExternalLink className="h-3 w-3" />
+                  </a>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="text-xs font-medium text-fg">Endpoint URL</label>
+                    <Input
+                      value={externalKeys.freellmapiEndpoint ?? "http://localhost:3001/v1"}
+                      onChange={(e) =>
+                        setExternalKeys({ ...externalKeys, freellmapiEndpoint: e.target.value })
+                      }
+                      placeholder="http://localhost:3001/v1 or https://your-freellmapi-host/v1"
+                      className="mt-1 font-mono text-xs"
+                    />
+                    <p className="text-[10px] text-fg-subtle mt-1">Default local: http://localhost:3001/v1</p>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-medium text-fg">Proxy API Key (Optional)</label>
+                    <Input
+                      type="password"
+                      value={externalKeys.freellmapiKey ?? ""}
+                      onChange={(e) =>
+                        setExternalKeys({ ...externalKeys, freellmapiKey: e.target.value })
+                      }
+                      placeholder="freellmapi-key (optional for local)"
+                      className="mt-1 font-mono text-xs"
+                    />
+                    <p className="text-[10px] text-fg-subtle mt-1">Leave empty if running locally without auth</p>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-fg">FreeLLMAPI Model / Router Strategy</label>
+                <div className="mt-1.5 flex gap-2">
+                  <Input
+                    value={model}
+                    onChange={(e) => setModel(e.target.value)}
+                    placeholder="freellmapi/auto, freellmapi/fusion, or model id"
+                    className="font-mono text-xs flex-1"
+                  />
+                </div>
+
+                {availablePresets.length > 0 && (
+                  <div className="mt-3">
+                    <span className="text-[11px] font-medium text-fg-subtle">
+                      Popular FreeLLMAPI Routing Targets:
+                    </span>
+                    <div className="mt-1.5 grid gap-1.5 sm:grid-cols-2">
+                      {availablePresets.map((opt) => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => setModel(opt.id)}
+                          className={cn(
+                            "flex flex-col text-left p-2 rounded-lg border text-xs transition-colors",
+                            model === opt.id
+                              ? "border-accent bg-accent/10"
+                              : "border-border bg-surface hover:bg-subtle"
+                          )}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-semibold text-fg">{opt.name}</span>
+                            {opt.recommended && <Badge tone="accent" className="text-[9px]">Recommended</Badge>}
+                          </div>
+                          <span className="font-mono text-[10px] text-fg-subtle">{opt.id}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* External Providers (Anthropic, Gemini, OpenAI, OpenRouter, Groq, Cerebras, Mistral) */}
+          {provider !== "workers-ai" && provider !== "freellmapi" && (
             <div className="space-y-4">
               {/* Anthropic OAuth vs API Key Switch */}
               {provider === "anthropic" && (
@@ -662,7 +835,7 @@ export function AiSettingsCard({
                 </div>
               )}
 
-              {/* Standard Key Input for OpenAI and OpenRouter */}
+              {/* Standard Key Input for Groq, Cerebras, Mistral, OpenAI, OpenRouter */}
               {provider !== "anthropic" && provider !== "gemini" && activeProviderInfo.keyName && (
                 <div>
                   <div className="flex items-center justify-between">
@@ -684,7 +857,7 @@ export function AiSettingsCard({
                   <div className="mt-1.5 relative flex items-center">
                     <Input
                       type={showKey[provider] ? "text" : "password"}
-                      value={externalKeys[activeProviderInfo.keyName] ?? ""}
+                      value={(externalKeys[activeProviderInfo.keyName] as string) ?? ""}
                       onChange={(e) =>
                         setExternalKeys({
                           ...externalKeys,
@@ -720,7 +893,6 @@ export function AiSettingsCard({
                   />
                 </div>
 
-                {/* Preset suggestions */}
                 {availablePresets.length > 0 && (
                   <div className="mt-3">
                     <span className="text-[11px] font-medium text-fg-subtle">
@@ -758,7 +930,7 @@ export function AiSettingsCard({
             <div>
               <p className="text-sm font-medium text-fg">Learn from conversations</p>
               <p className="text-xs text-fg-subtle">
-                Automatically extract durable preferences and save to memory.
+                Automatically extract durable preferences and save to persistent memory.
               </p>
             </div>
             <Switch
@@ -784,16 +956,125 @@ export function AiSettingsCard({
         </Card>
       </section>
 
+      {/* Zero-Cost AI Usage Budgets & Failover Guards */}
+      <section className="space-y-2">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-1">
+          <div>
+            <h2 className="text-xs font-medium uppercase tracking-wider text-fg-subtle flex items-center gap-1.5">
+              <ShieldCheck className="h-4 w-4 text-emerald-500" />
+              Zero-Cost AI Usage Budgets &amp; Failover Guards
+            </h2>
+            <p className="text-xs text-fg-subtle mt-0.5">
+              Automatically trigger model failover when daily budgets or cost limits are reached to ensure 100% free usage without interruption.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-fg">Budget Guards</span>
+            <Switch
+              checked={budget.enabled}
+              onChange={(v) => setBudget({ ...budget, enabled: v })}
+              label="Budget guards enabled"
+            />
+          </div>
+        </div>
+
+        <Card className="p-5 space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            {/* Failover on budget toggle */}
+            <div className="rounded-xl border border-border bg-subtle p-3 flex items-center justify-between">
+              <div>
+                <span className="text-xs font-semibold text-fg">Failover on Budget Limit</span>
+                <p className="text-[10px] text-fg-subtle">
+                  Seamlessly switches to backup model instead of erroring when budget limit is met.
+                </p>
+              </div>
+              <Switch
+                checked={budget.failoverOnBudget}
+                onChange={(v) => setBudget({ ...budget, failoverOnBudget: v })}
+                label="Failover on budget"
+              />
+            </div>
+
+            {/* Strict Free-Tier Only toggle */}
+            <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 flex items-center justify-between">
+              <div>
+                <span className="text-xs font-semibold text-fg flex items-center gap-1.5">
+                  <Shield className="h-3.5 w-3.5 text-emerald-500" />
+                  Strict 100% Free-Tier Mode
+                </span>
+                <p className="text-[10px] text-fg-subtle">
+                  Skips any billable model in the chain, routing exclusively to free providers.
+                </p>
+              </div>
+              <Switch
+                checked={budget.freeTierOnly}
+                onChange={(v) => setBudget({ ...budget, freeTierOnly: v })}
+                label="Strict free-tier only"
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-3 pt-2">
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-fg">Max Daily AI Requests</label>
+              <Input
+                type="number"
+                min={0}
+                value={budget.maxDailyRequests}
+                onChange={(e) => setBudget({ ...budget, maxDailyRequests: Number(e.target.value) })}
+                className="text-xs"
+              />
+              <p className="text-[10px] text-fg-subtle">Triggers fallback after N requests per day.</p>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-fg">Max Daily Tokens</label>
+              <Input
+                type="number"
+                min={0}
+                value={budget.maxDailyTokens}
+                onChange={(e) => setBudget({ ...budget, maxDailyTokens: Number(e.target.value) })}
+                className="text-xs"
+              />
+              <p className="text-[10px] text-fg-subtle">Input + output token cap before failover.</p>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-fg">Max Monthly Cost ($ USD)</label>
+              <Input
+                type="number"
+                min={0}
+                step={0.01}
+                value={budget.maxMonthlyCostUsd}
+                onChange={(e) => setBudget({ ...budget, maxMonthlyCostUsd: Number(e.target.value) })}
+                className="text-xs font-semibold text-emerald-600"
+              />
+              <p className="text-[10px] text-fg-subtle">$0.00 guarantees zero unexpected paid charges.</p>
+            </div>
+          </div>
+
+          {budget.maxMonthlyCostUsd === 0 && (
+            <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-3 py-2 text-xs text-emerald-600 flex items-center justify-between">
+              <span className="flex items-center gap-1.5 font-medium">
+                <Check className="h-4 w-4" />
+                Zero-Cost Guarantee: All requests route through free allowances with automatic fallback.
+              </span>
+              <Badge tone="accent" className="bg-emerald-500/20 text-emerald-600 text-[9px]">100% Free</Badge>
+            </div>
+          )}
+        </Card>
+      </section>
+
       {/* Multi-Provider Auto-Failover Section */}
       <section className="space-y-2">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-1">
           <div>
             <h2 className="text-xs font-medium uppercase tracking-wider text-fg-subtle flex items-center gap-1.5">
               <Zap className="h-4 w-4 text-accent" />
-              Multi-Provider Auto-Failover
+              Multi-Provider Auto-Failover Chain
             </h2>
             <p className="text-xs text-fg-subtle mt-0.5">
-              Automatically switch models when your active provider runs out of quota, hits rate limits (429), or errors.
+              When a provider hits rate limits (429) or budget limits, Talorys automatically switches seamlessly to your next backup model.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -898,6 +1179,10 @@ export function AiSettingsCard({
                     const nextP = e.target.value as LLMProviderId;
                     setNewFallbackProvider(nextP);
                     if (nextP === "workers-ai") setNewFallbackModel("@cf/meta/llama-3.3-70b-instruct-fp8-fast");
+                    else if (nextP === "freellmapi") setNewFallbackModel("freellmapi/auto");
+                    else if (nextP === "groq") setNewFallbackModel("llama-3.3-70b-versatile");
+                    else if (nextP === "cerebras") setNewFallbackModel("llama-3.3-70b");
+                    else if (nextP === "mistral") setNewFallbackModel("mistral-small-latest");
                     else if (nextP === "anthropic") setNewFallbackModel("claude-3-5-haiku-20241022");
                     else if (nextP === "openai") setNewFallbackModel("gpt-4o-mini");
                     else if (nextP === "openrouter") setNewFallbackModel("anthropic/claude-3.7-sonnet");
@@ -940,7 +1225,7 @@ export function AiSettingsCard({
       {/* Generation & Limits Section */}
       <section className="space-y-2">
         <h2 className="px-1 text-xs font-medium uppercase tracking-wider text-fg-subtle">
-          Generation & Limits
+          Generation &amp; Limits
         </h2>
         <Card className="p-5 space-y-4">
           <div>
@@ -990,6 +1275,16 @@ export function AiSettingsCard({
                 setExternalKeys(settings.externalKeys ?? {});
                 setFallbacks(settings.fallbacks ?? []);
                 setAutoFailover(settings.autoFailover ?? true);
+                setBudget(
+                  settings.budget ?? {
+                    enabled: true,
+                    maxDailyRequests: 100,
+                    maxDailyTokens: 500000,
+                    maxMonthlyCostUsd: 0.0,
+                    failoverOnBudget: true,
+                    freeTierOnly: false,
+                  }
+                );
               }}
             >
               Reset

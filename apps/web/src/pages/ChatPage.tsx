@@ -337,16 +337,24 @@ function ConversationModelSwitcher({
                 else if (p === "openai") setModel("gpt-4o");
                 else if (p === "openrouter") setModel("anthropic/claude-3.7-sonnet");
                 else if (p === "gemini") setModel("gemini-2.0-flash");
+                else if (p === "freellmapi") setModel("freellmapi/auto");
+                else if (p === "groq") setModel("llama-3.3-70b-versatile");
+                else if (p === "cerebras") setModel("llama-3.3-70b");
+                else if (p === "mistral") setModel("mistral-small-latest");
                 else setModel("");
               }}
               className="mt-1 block w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-fg focus:border-accent focus:outline-none"
             >
               <option value="">Inherit Default ({settings.data?.provider ?? "workers-ai"})</option>
               <option value="workers-ai">Cloudflare Workers AI</option>
+              <option value="freellmapi">FreeLLMAPI Gateway (635 Free Models)</option>
+              <option value="groq">Groq LPUs (Free Ultra-Fast)</option>
+              <option value="cerebras">Cerebras (Free 2,100 T/s)</option>
+              <option value="mistral">Mistral AI (Free Tier)</option>
+              <option value="gemini">Google / Antigravity</option>
               <option value="anthropic">Anthropic Claude</option>
               <option value="openai">OpenAI</option>
               <option value="openrouter">OpenRouter</option>
-              <option value="gemini">Google Gemini</option>
             </select>
           </div>
           <div>

@@ -19,6 +19,7 @@ export function createAIProvider(
 
   let credential = settings.externalKeys?.[providerId as keyof typeof settings.externalKeys];
   let isOAuth = false;
+  let options: { endpoint?: string } | undefined = undefined;
 
   if (providerId === "anthropic") {
     if (settings.externalKeys?.anthropicOAuthToken) {
@@ -30,13 +31,22 @@ export function createAIProvider(
       credential = settings.externalKeys.googleOAuthToken;
       isOAuth = true;
     }
+  } else if (providerId === "freellmapi") {
+    credential = settings.externalKeys?.freellmapiKey || "freellmapi-local";
+    options = { endpoint: settings.externalKeys?.freellmapiEndpoint || "http://localhost:3001/v1" };
+  } else if (providerId === "groq") {
+    credential = settings.externalKeys?.groqKey || settings.externalKeys?.openai;
+  } else if (providerId === "cerebras") {
+    credential = settings.externalKeys?.cerebrasKey;
+  } else if (providerId === "mistral") {
+    credential = settings.externalKeys?.mistralKey;
   }
 
   if (!credential) {
     throw new Error(
-      `Credential (API Key or OAuth) for "${providerId}" is not configured. Configure it in Settings -> AI & Models to use this provider.`,
+      `Credential for "${providerId}" is not configured. Configure it in Settings -> AI & Models to use this provider.`,
     );
   }
 
-  return new ExternalAIProvider(providerId as SupportedExternalProvider, model, credential, isOAuth);
+  return new ExternalAIProvider(providerId as SupportedExternalProvider, model, credential, isOAuth, options);
 }

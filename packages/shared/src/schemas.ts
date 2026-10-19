@@ -257,7 +257,17 @@ export const mcpTestSchema = z.object({
 
 // ---------- LLM Providers ----------
 
-export const llmProviderSchema = z.enum(["workers-ai", "anthropic", "openai", "openrouter", "gemini"]);
+export const llmProviderSchema = z.enum([
+  "workers-ai",
+  "anthropic",
+  "openai",
+  "openrouter",
+  "gemini",
+  "freellmapi",
+  "groq",
+  "cerebras",
+  "mistral",
+]);
 export type LLMProviderId = z.infer<typeof llmProviderSchema>;
 
 export const fallbackProviderSchema = z.object({
@@ -285,8 +295,24 @@ export const externalKeysSchema = z.object({
   googleClientSecret: z.string().optional(),
   googleTokenExpiry: z.number().optional(),
   googleUserEmail: z.string().optional(),
+  // FreeLLMAPI & Free Tier Providers
+  freellmapiEndpoint: z.string().optional(),
+  freellmapiKey: z.string().optional(),
+  groqKey: z.string().optional(),
+  cerebrasKey: z.string().optional(),
+  mistralKey: z.string().optional(),
 }).partial();
 export type ExternalKeys = z.infer<typeof externalKeysSchema>;
+
+export const aiBudgetSchema = z.object({
+  enabled: z.boolean().default(true),
+  maxDailyRequests: z.number().int().min(0).default(100),
+  maxDailyTokens: z.number().int().min(0).default(500000),
+  maxMonthlyCostUsd: z.number().min(0).default(0.00),
+  failoverOnBudget: z.boolean().default(true),
+  freeTierOnly: z.boolean().default(false),
+});
+export type AiBudget = z.infer<typeof aiBudgetSchema>;
 
 // ---------- Marketplaces ----------
 
@@ -515,10 +541,18 @@ export const settingsSchema = z.object({
   externalKeys: externalKeysSchema.default({}),
   fallbacks: z.array(fallbackProviderSchema).default([]),
   autoFailover: z.boolean().default(true),
+  budget: aiBudgetSchema.default({
+    enabled: true,
+    maxDailyRequests: 100,
+    maxDailyTokens: 500000,
+    maxMonthlyCostUsd: 0.00,
+    failoverOnBudget: true,
+    freeTierOnly: false,
+  }),
 });
 export type Settings = z.infer<typeof settingsSchema>;
 export const settingsUpdateSchema = settingsSchema
-  .omit({ limits: true, memoryHistory: true, externalKeys: true })
+  .omit({ limits: true, memoryHistory: true, externalKeys: true, budget: true })
   .partial()
   .extend({
     limits: limitsSchema.partial().optional(),
@@ -526,6 +560,7 @@ export const settingsUpdateSchema = settingsSchema
     externalKeys: externalKeysSchema.partial().optional(),
     fallbacks: z.array(fallbackProviderSchema).optional(),
     autoFailover: z.boolean().optional(),
+    budget: aiBudgetSchema.partial().optional(),
   });
 
 export const loginSchema = z.object({ password: z.string().min(1).max(256) });

@@ -123,7 +123,9 @@ export class AgentRunner {
       if (!provider) {
         throw new AppError("AI_UNAVAILABLE", "AI provider is not configured for this deployment. Everything else keeps working.");
       }
-      if (!s.usage.canUseAi(limits)) throw aiLimitReached(limits.maxAiRequestsPerDay);
+      const hasFallbacks = settings.autoFailover && (settings.fallbacks?.length ?? 0) > 0;
+      const isWorkersAiOnly = (conversation.provider_override || settings.provider || "workers-ai") === "workers-ai" && !hasFallbacks;
+      if (isWorkersAiOnly && !s.usage.canUseAi(limits)) throw aiLimitReached(limits.maxAiRequestsPerDay);
 
       // 2. Context: relevant memories, summary, recent history within the token budget.
       const selected = this.ext ? await this.ext.selectMemories(userMessage.content) : selectRelevantMemories(s.memories, userMessage.content);
@@ -253,8 +255,53 @@ export class AgentRunner {
 
         if (!currentProvider) continue;
 
+        // Check budget limits and free-tier guards
+        const budget = settings.budget;
+        if (budget?.enabled && budget.failoverOnBudget && i < candidates.length - 1) {
+          const todayUsage = s.usage.today();
+          const todayRequests = todayUsage.ai_requests;
+          const todayTokens = todayUsage.input_tokens_reported + todayUsage.output_tokens_reported;
+          const todayCost = todayUsage.cost_usd_estimate ?? 0;
+
+          const requestExceeded = budget.maxDailyRequests > 0 && todayRequests >= budget.maxDailyRequests;
+          const tokenExceeded = budget.maxDailyTokens > 0 && todayTokens >= budget.maxDailyTokens;
+          const freeTierViolation = budget.freeTierOnly && currentProvider.billable;
+          const costExceeded = budget.maxMonthlyCostUsd >= 0 && todayCost > budget.maxMonthlyCostUsd;
+
+          const budgetHit = requestExceeded || tokenExceeded || freeTierViolation || costExceeded;
+
+          if (budgetHit) {
+            const next = candidates[i + 1]!;
+            const reason = freeTierViolation
+              ? "Billed model avoided (100% Free-Tier Mode active)"
+              : costExceeded
+              ? `Max cost threshold ($${budget.maxMonthlyCostUsd.toFixed(2)}) reached`
+              : requestExceeded
+              ? `Daily request budget (${budget.maxDailyRequests}) reached`
+              : `Daily token budget (${budget.maxDailyTokens.toLocaleString()}) reached`;
+
+            const budgetNotice = `*[Zero-Cost Budget Guard: ${reason} for ${candidate.provider}. Failing over to free ${next.provider} (${next.model})...]*\n\n`;
+            yield { type: "text", delta: budgetNotice };
+            text += budgetNotice;
+            continue;
+          }
+        }
+
+        // Check Workers AI native limit and fail over to free alternative if possible
+        if (candidate.provider === "workers-ai" && !s.usage.canUseAi(limits) && i < candidates.length - 1) {
+          const next = candidates[i + 1]!;
+          const limitNotice = `*[Cloudflare Workers AI daily request limit reached. Failing over to ${next.provider} (${next.model})...]*\n\n`;
+          yield { type: "text", delta: limitNotice };
+          text += limitNotice;
+          continue;
+        }
+
         try {
-          if (!s.usage.reserveAi(limits)) throw aiLimitReached(limits.maxAiRequestsPerDay);
+          if (candidate.provider === "workers-ai" && !s.usage.reserveAi(limits)) {
+            throw aiLimitReached(limits.maxAiRequestsPerDay);
+          } else if (candidate.provider !== "workers-ai") {
+            s.usage.increment({ ai_requests: 1 });
+          }
 
           for await (const event of currentProvider.generateWithTools({
             system,

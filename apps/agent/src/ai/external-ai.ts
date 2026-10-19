@@ -5,7 +5,15 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import type { AgentEvent, AIProvider, GenerateRequest, ToolRequest, Usage } from "./provider";
 import { classifyAiError, estimateTokens, modelUsage, tokens, withUsage } from "./provider";
 
-export type SupportedExternalProvider = "anthropic" | "openai" | "openrouter" | "gemini";
+export type SupportedExternalProvider =
+  | "anthropic"
+  | "openai"
+  | "openrouter"
+  | "gemini"
+  | "freellmapi"
+  | "groq"
+  | "cerebras"
+  | "mistral";
 
 export class ExternalAIProvider implements AIProvider {
   readonly billable = false; // Billed on user's own external provider account
@@ -15,6 +23,7 @@ export class ExternalAIProvider implements AIProvider {
     readonly model: string,
     private readonly apiKey: string,
     private readonly isOAuth: boolean = false,
+    private readonly options?: { endpoint?: string },
   ) {}
 
   private createModel(): LanguageModelV1 {
@@ -58,6 +67,35 @@ export class ExternalAIProvider implements AIProvider {
             : undefined,
         });
         return google(this.model) as unknown as LanguageModelV1;
+      }
+      case "freellmapi": {
+        const baseURL = this.options?.endpoint || "http://localhost:3001/v1";
+        const freellmapi = createOpenAI({
+          baseURL,
+          apiKey: this.apiKey || "freellmapi-local",
+        });
+        return freellmapi(this.model) as unknown as LanguageModelV1;
+      }
+      case "groq": {
+        const groq = createOpenAI({
+          baseURL: "https://api.groq.com/openai/v1",
+          apiKey: this.apiKey,
+        });
+        return groq(this.model) as unknown as LanguageModelV1;
+      }
+      case "cerebras": {
+        const cerebras = createOpenAI({
+          baseURL: "https://api.cerebras.ai/v1",
+          apiKey: this.apiKey,
+        });
+        return cerebras(this.model) as unknown as LanguageModelV1;
+      }
+      case "mistral": {
+        const mistral = createOpenAI({
+          baseURL: "https://api.mistral.ai/v1",
+          apiKey: this.apiKey,
+        });
+        return mistral(this.model) as unknown as LanguageModelV1;
       }
       default:
         throw new Error(`Unsupported external AI provider: ${this.id}`);

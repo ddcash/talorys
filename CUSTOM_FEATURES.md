@@ -223,3 +223,50 @@ Whenever upstream changes are merged, refer to this document to audit, preserve,
   - `apps/agent/src/services/settings.ts`: Default settings (`fallbacks: []`, `autoFailover: true`), get and update handlers.
   - `apps/agent/src/agent/runner.ts`: Automatic fallback failover loop with live transition yield and candidate chaining.
   - `apps/web/src/components/AiSettingsCard.tsx`: Complete failover chain UI manager with priority ordering, move controls, and fallback creation.
+
+---
+
+## 12. Zero-Cost AI Usage Budgets & Automated Budget Failover
+- **Status**: Active
+- **Description**: Configurable usage budget guards that intercept outgoing AI requests before any paid usage occurs. If daily request limits, daily token ceilings, or monthly cost budgets are reached, Talorys automatically fails over to configured free backup models without breaking conversation continuity, guaranteeing 100% free usage.
+- **Key Capabilities**:
+  - **Zero-Cost Budget Guard**: Set `maxMonthlyCostUsd: 0.00` to guarantee that paid model API calls are never made once budget thresholds are approached.
+  - **Daily Limits Enforcement**: Enforce custom thresholds on daily requests (`maxDailyRequests`) and daily tokens (`maxDailyTokens`).
+  - **Free-Tier Only Mode**: Option (`freeTierOnly: true`) that restricts execution solely to zero-cost free-tier models (Workers AI free tier, FreeLLMAPI pool, Groq LPU free tier, Cerebras Wafer-Scale free tier, Mistral free tier).
+  - **Pre-Execution Budget Interceptor**: Evaluates today's usage from `UsageService` before dispatching to any provider. If a threshold is reached, seamlessly streams an alert notification (`*[Budget Notice: Daily budget reached. Failing over to free backup <model>...]*`) and invokes the next free fallback candidate.
+  - **Workers AI Daily Limit Detection**: Catches Workers AI daily quota limits and automatically pivots to backup free providers rather than throwing an error.
+  - **UI Budget Management**: Visual card in Settings with toggle switches, limit inputs, real-time feedback, and a "Zero-Cost Guarantee: $0.00 / month" indicator badge.
+- **Files Touched**:
+  - `packages/shared/src/schemas.ts`: Added `aiBudgetSchema`, `AiBudget`, updated `settingsSchema` and `settingsUpdateSchema`.
+  - `apps/agent/src/services/settings.ts`: Added default `budget` configuration, persistence in `get()` and `update()`.
+  - `apps/agent/src/agent/runner.ts`: Injected pre-execution budget evaluator and seamless failover mechanism.
+  - `apps/web/src/components/AiSettingsCard.tsx`: Added "Zero-Cost AI Usage Budgets & Failover Guards" interface with switches and inputs.
+
+---
+
+## 13. FreeLLMAPI Aggregator & Free-Tier Ecosystem Integration (Groq, Cerebras, Mistral)
+- **Status**: Active
+- **Description**: Comprehensive integration with FreeLLMAPI (aggregating 34 free providers and 635 models) along with premier high-throughput free-tier providers (Groq LPUs, Cerebras Wafer-Scale Engines, and Mistral Free Tier), all operating under a unified persistent memory system.
+- **Key Capabilities**:
+  - **FreeLLMAPI Gateway**: Built-in adapter for FreeLLMAPI endpoints (customizable URL and API key, defaulting to `http://localhost:3001/v1` or public gateways).
+  - **Auto Router & Virtual Fusion**: Supports `freellmapi/auto` (intelligently routes across 34 providers and 635 free models for speed and capability) and `freellmapi/fusion` (multi-model parallel consensus).
+  - **Groq LPU Acceleration**: Access Meta Llama 3.3 70B Versatile, Llama 3.1 8B Instant, and Mixtral 8x7B at 250–800 tokens/sec on Groq's free tier.
+  - **Cerebras Wafer-Scale Inference**: Access Llama 3.3 70B and Llama 3.1 8B at world-record speeds of 2,100–2,800 tokens/sec on Cerebras's free tier.
+  - **Mistral Free Tier**: Access Mistral Small Latest and Codestral 22B via Mistral's developer free allocation.
+  - **Unified Persistent Memory & Persona Continuity**: Regardless of which model or provider executes a turn (Workers AI, FreeLLMAPI, Groq, Cerebras, Mistral, Claude, Gemini), all models share the exact same persistent context:
+    - Long-term memory notes from Cloudflare Inkstone MCP
+    - Durable Object SQLite facts and activity logs
+    - Custom rules and skills from the marketplace
+    - Complete conversation history
+    - Enforced unified persona prompt clause ensuring seamless continuity across all interactions.
+  - **Per-Conversation Model Selection**: Freely switch conversations between FreeLLMAPI, Groq, Cerebras, Mistral, Cloudflare, and major providers using the chat model switcher.
+- **Files Touched**:
+  - `packages/shared/src/schemas.ts`: Expanded `llmProviderSchema` with `"freellmapi"`, `"groq"`, `"cerebras"`, `"mistral"`; added keys to `externalKeysSchema`.
+  - `apps/agent/src/ai/external-ai.ts`: Implemented OpenAI-compatible adapters with dedicated endpoints for FreeLLMAPI, Groq, Cerebras, and Mistral.
+  - `apps/agent/src/ai/factory.ts`: Wired provider resolution with fallback defaults.
+  - `apps/agent/src/api/routes/models.ts`: Added presets catalog for FreeLLMAPI (5 models), Groq (3 models), Cerebras (2 models), Mistral (2 models).
+  - `apps/agent/src/agent/prompt.ts`: Injected unified AI memory and personality continuity system instructions.
+  - `apps/agent/src/agent/runner.ts`: Multi-provider failover routing with persistent context injection.
+  - `apps/web/src/components/AiSettingsCard.tsx`: Added provider credentials and endpoint configuration fields.
+  - `apps/web/src/pages/ChatPage.tsx`: Added new providers and models to the conversation model switcher.
+

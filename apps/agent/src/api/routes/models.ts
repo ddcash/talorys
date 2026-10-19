@@ -197,6 +197,102 @@ const PRESET_MODELS: Record<string, ModelInfo[]> = {
       tags: ["fast", "general"],
     },
   ],
+  freellmapi: [
+    {
+      id: "freellmapi/auto",
+      name: "FreeLLMAPI Auto Router (Best Free Model)",
+      description: "Automatically routes requests across 34 free providers and 635 models based on capability and speed.",
+      provider: "freellmapi",
+      tags: ["recommended", "free", "router", "auto-failover"],
+      recommended: true,
+    },
+    {
+      id: "freellmapi/fusion",
+      name: "FreeLLMAPI Virtual Fusion (Multi-Model Consensus)",
+      description: "Fans out prompts to multiple free models in parallel and synthesizes a single consensus answer.",
+      provider: "freellmapi",
+      tags: ["free", "fusion", "reasoning"],
+    },
+    {
+      id: "gemini-2.0-flash",
+      name: "Gemini 2.0 Flash (FreeLLMAPI Free Tier)",
+      description: "Google Gemini 2.0 Flash via FreeLLMAPI free pool.",
+      provider: "freellmapi",
+      tags: ["free", "fast", "multimodal"],
+    },
+    {
+      id: "llama-3.3-70b-versatile",
+      name: "Llama 3.3 70B (FreeLLMAPI)",
+      description: "Meta 70B high-reasoning model via FreeLLMAPI free allocation.",
+      provider: "freellmapi",
+      tags: ["free", "general", "tool-calling"],
+    },
+    {
+      id: "deepseek-chat",
+      name: "DeepSeek V3 (FreeLLMAPI)",
+      description: "DeepSeek general and coding model via FreeLLMAPI.",
+      provider: "freellmapi",
+      tags: ["free", "coding"],
+    },
+  ],
+  groq: [
+    {
+      id: "llama-3.3-70b-versatile",
+      name: "Llama 3.3 70B Versatile",
+      description: "Free high-speed 70B model running at ~250 tokens/sec on Groq LPUs.",
+      provider: "groq",
+      tags: ["recommended", "free", "fast", "tool-calling"],
+      recommended: true,
+    },
+    {
+      id: "llama-3.1-8b-instant",
+      name: "Llama 3.1 8B Instant",
+      description: "Ultra-low latency 8B model running at ~800 tokens/sec on Groq.",
+      provider: "groq",
+      tags: ["free", "ultra-fast"],
+    },
+    {
+      id: "mixtral-8x7b-32768",
+      name: "Mixtral 8x7B (32k context)",
+      description: "Mistral MoE architecture model with 32k context on Groq free tier.",
+      provider: "groq",
+      tags: ["free", "moe"],
+    },
+  ],
+  cerebras: [
+    {
+      id: "llama-3.3-70b",
+      name: "Llama 3.3 70B",
+      description: "World-record 2,100+ tokens/sec inference speed on Cerebras Wafer-Scale Engine.",
+      provider: "cerebras",
+      tags: ["recommended", "free", "ultra-fast"],
+      recommended: true,
+    },
+    {
+      id: "llama-3.1-8b",
+      name: "Llama 3.1 8B",
+      description: "2,800+ tokens/sec instantaneous inference speed on Cerebras free tier.",
+      provider: "cerebras",
+      tags: ["free", "ultra-fast"],
+    },
+  ],
+  mistral: [
+    {
+      id: "mistral-small-latest",
+      name: "Mistral Small Latest",
+      description: "Mistral's cost-effective general intelligence model on free tier.",
+      provider: "mistral",
+      tags: ["recommended", "free", "general"],
+      recommended: true,
+    },
+    {
+      id: "codestral-latest",
+      name: "Codestral 22B",
+      description: "Mistral's specialized coding model for software engineering.",
+      provider: "mistral",
+      tags: ["free", "coding"],
+    },
+  ],
 };
 
 export const modelsRoutes = new Hono<AppEnv>();

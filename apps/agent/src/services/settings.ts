@@ -18,6 +18,14 @@ export const DEFAULT_SETTINGS: Settings = {
   externalKeys: {},
   fallbacks: [],
   autoFailover: true,
+  budget: {
+    enabled: true,
+    maxDailyRequests: 100,
+    maxDailyTokens: 500000,
+    maxMonthlyCostUsd: 0.00,
+    failoverOnBudget: true,
+    freeTierOnly: false,
+  },
 };
 
 const SETTINGS_KEY = "app.settings";
@@ -41,6 +49,7 @@ export class SettingsService {
       externalKeys: { ...DEFAULT_SETTINGS.externalKeys, ...(stored.externalKeys ?? {}) },
       fallbacks: stored.fallbacks ?? DEFAULT_SETTINGS.fallbacks,
       autoFailover: stored.autoFailover ?? DEFAULT_SETTINGS.autoFailover,
+      budget: { ...DEFAULT_SETTINGS.budget, ...(stored.budget ?? {}) },
     };
     const parsed = settingsSchema.safeParse(merged);
     if (parsed.success) return parsed.data;
@@ -61,6 +70,7 @@ export class SettingsService {
       externalKeys: { ...current.externalKeys, ...stripUndefined(parsedPatch.data.externalKeys ?? {}) },
       fallbacks: parsedPatch.data.fallbacks !== undefined ? parsedPatch.data.fallbacks : current.fallbacks,
       autoFailover: parsedPatch.data.autoFailover !== undefined ? parsedPatch.data.autoFailover : current.autoFailover,
+      budget: { ...current.budget, ...stripUndefined(parsedPatch.data.budget ?? {}) },
     };
     const parsed = settingsSchema.safeParse(next);
     if (!parsed.success) throw ValidationError.fromZod(parsedPatch.error ?? parsed.error);
