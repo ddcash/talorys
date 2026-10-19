@@ -64583,7 +64583,7 @@ function classifyAiError(error62) {
     return new AppError("AI_UNAVAILABLE", "The response was cancelled.");
   }
   console.error("Workers AI error", message);
-  return new AppError("AI_UNAVAILABLE", "The AI model could not respond. Please try again.");
+  return new AppError("AI_UNAVAILABLE", `The AI model could not respond: ${message.slice(0, 180)}`);
 }
 __name(classifyAiError, "classifyAiError");
 function errorMessage(error62) {
@@ -67190,7 +67190,7 @@ var McpClient = class {
           if (typeof noteData === "string") {
             text2 = noteData;
           } else if (typeof noteData === "object" && noteData !== null) {
-            text2 = noteData.data?.text ?? noteData.text ?? noteData.data?.content ?? "";
+            text2 = noteData.data?.text ?? noteData.text ?? noteData.data?.content ?? noteData.content ?? "";
           }
           if (text2) {
             const clean = text2.replace(/[\r\n]+/g, " ").trim().slice(0, 400);
@@ -67225,6 +67225,49 @@ var INKSTONE_OPTIMIZED_TOOLS = /* @__PURE__ */ new Set([
   "create_note",
   "edit_note"
 ]);
+function jsonSchemaToZod(schema) {
+  if (!schema || !schema.properties || typeof schema.properties !== "object") {
+    return external_exports.object({
+      query: external_exports.string().optional().describe("Query or argument for this tool")
+    });
+  }
+  const shape = {};
+  const properties = schema.properties;
+  const requiredList = Array.isArray(schema.required) ? schema.required : [];
+  for (const [key, prop] of Object.entries(properties)) {
+    let fieldZod;
+    const type = prop.type;
+    if (type === "string") {
+      if (Array.isArray(prop.enum) && prop.enum.length > 0) {
+        fieldZod = external_exports.enum(prop.enum);
+      } else {
+        fieldZod = external_exports.string();
+      }
+    } else if (type === "number" || type === "integer") {
+      fieldZod = external_exports.number();
+    } else if (type === "boolean") {
+      fieldZod = external_exports.boolean();
+    } else if (type === "array") {
+      fieldZod = external_exports.array(external_exports.string().or(external_exports.unknown()));
+    } else if (type === "object") {
+      fieldZod = external_exports.record(external_exports.string(), external_exports.unknown());
+    } else {
+      fieldZod = external_exports.string().or(external_exports.unknown());
+    }
+    if (prop.description && typeof prop.description === "string") {
+      fieldZod = fieldZod.describe(prop.description);
+    }
+    if (!requiredList.includes(key)) {
+      fieldZod = fieldZod.optional();
+    }
+    shape[key] = fieldZod;
+  }
+  if (Object.keys(shape).length === 0) {
+    shape.query = external_exports.string().optional().describe("Query or argument for this tool");
+  }
+  return external_exports.object(shape);
+}
+__name(jsonSchemaToZod, "jsonSchemaToZod");
 function buildMcpTools(server) {
   const tools = [];
   const sourceTools = server.cached_tools ?? [];
@@ -67238,7 +67281,7 @@ function buildMcpTools(server) {
     const def = defineTool({
       name: registeredName,
       description: `[${server.name}] ${tool2.description || `Tool ${tool2.name}`}`,
-      input: external_exports.record(external_exports.string(), external_exports.unknown()).passthrough(),
+      input: jsonSchemaToZod(tool2.inputSchema),
       permission: "write",
       label: /* @__PURE__ */ __name(() => `Running ${server.name} tool "${tool2.name}"`, "label"),
       execute: /* @__PURE__ */ __name(async (input2) => {

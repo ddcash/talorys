@@ -248,7 +248,7 @@ export class McpClient {
           if (typeof noteData === "string") {
             text = noteData;
           } else if (typeof noteData === "object" && noteData !== null) {
-            text = (noteData as any).data?.text ?? (noteData as any).text ?? (noteData as any).data?.content ?? "";
+            text = (noteData as any).data?.text ?? (noteData as any).text ?? (noteData as any).data?.content ?? (noteData as any).content ?? "";
           }
 
           if (text) {

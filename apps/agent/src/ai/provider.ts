@@ -128,7 +128,7 @@ export function classifyAiError(error: unknown): AppError {
     return new AppError("AI_UNAVAILABLE", "The response was cancelled.");
   }
   console.error("Workers AI error", message);
-  return new AppError("AI_UNAVAILABLE", "The AI model could not respond. Please try again.");
+  return new AppError("AI_UNAVAILABLE", `The AI model could not respond: ${message.slice(0, 180)}`);
 }
 
 function errorMessage(error: unknown): string {
