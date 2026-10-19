@@ -40,13 +40,43 @@ export class McpClient {
   private static getHeaders(authToken?: string | null): HeadersInit {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
-      Accept: "application/json",
+      Accept: "application/json, text/event-stream",
       "MCP-Protocol-Version": "2024-11-05",
     };
     if (authToken) {
       headers.Authorization = authToken.startsWith("Bearer ") ? authToken : `Bearer ${authToken}`;
     }
     return headers;
+  }
+
+  /**
+   * Parses JSON-RPC response from either application/json or SSE text/event-stream format.
+   */
+  private static async parseResponse<T>(response: Response): Promise<JsonRpcResponse<T>> {
+    const rawText = await response.text();
+    // Check if it's SSE (Server-Sent Events) or contains 'data:'
+    if (rawText.includes("data:")) {
+      const lines = rawText.split("\n");
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith("data:")) {
+          const payload = trimmed.slice(5).trim();
+          if (payload && payload !== "[DONE]") {
+            try {
+              return JSON.parse(payload) as JsonRpcResponse<T>;
+            } catch {
+              // keep searching
+            }
+          }
+        }
+      }
+    }
+
+    try {
+      return JSON.parse(rawText) as JsonRpcResponse<T>;
+    } catch {
+      throw new Error(`Failed to parse MCP response: ${rawText.slice(0, 300)}`);
+    }
   }
 
   /**
@@ -76,7 +106,7 @@ export class McpClient {
         };
       }
 
-      const body = (await response.json()) as JsonRpcResponse<McpToolsListResult>;
+      const body = await this.parseResponse<McpToolsListResult>(response);
       if (body.error) {
         return {
           ok: false,
@@ -148,7 +178,7 @@ export class McpClient {
       throw new Error(`MCP tool call failed (HTTP ${response.status}): ${errText.slice(0, 300) || response.statusText}`);
     }
 
-    const body = (await response.json()) as JsonRpcResponse<McpToolCallResult>;
+    const body = await this.parseResponse<McpToolCallResult>(response);
     if (body.error) {
       throw new Error(`MCP Error ${body.error.code}: ${body.error.message}`);
     }

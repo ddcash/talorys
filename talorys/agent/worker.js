@@ -67016,13 +67016,39 @@ var McpClient = class {
   static getHeaders(authToken) {
     const headers = {
       "Content-Type": "application/json",
-      Accept: "application/json",
+      Accept: "application/json, text/event-stream",
       "MCP-Protocol-Version": "2024-11-05"
     };
     if (authToken) {
       headers.Authorization = authToken.startsWith("Bearer ") ? authToken : `Bearer ${authToken}`;
     }
     return headers;
+  }
+  /**
+   * Parses JSON-RPC response from either application/json or SSE text/event-stream format.
+   */
+  static async parseResponse(response) {
+    const rawText = await response.text();
+    if (rawText.includes("data:")) {
+      const lines = rawText.split("\n");
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith("data:")) {
+          const payload = trimmed.slice(5).trim();
+          if (payload && payload !== "[DONE]") {
+            try {
+              return JSON.parse(payload);
+            } catch {
+            }
+          }
+        }
+      }
+    }
+    try {
+      return JSON.parse(rawText);
+    } catch {
+      throw new Error(`Failed to parse MCP response: ${rawText.slice(0, 300)}`);
+    }
   }
   /**
    * Tests connection to an MCP server endpoint by performing tools/list.
@@ -67049,7 +67075,7 @@ var McpClient = class {
           error: `HTTP ${response.status}: ${text2.slice(0, 200) || response.statusText}`
         };
       }
-      const body2 = await response.json();
+      const body2 = await this.parseResponse(response);
       if (body2.error) {
         return {
           ok: false,
@@ -67110,7 +67136,7 @@ var McpClient = class {
       const errText = await response.text().catch(() => "");
       throw new Error(`MCP tool call failed (HTTP ${response.status}): ${errText.slice(0, 300) || response.statusText}`);
     }
-    const body2 = await response.json();
+    const body2 = await this.parseResponse(response);
     if (body2.error) {
       throw new Error(`MCP Error ${body2.error.code}: ${body2.error.message}`);
     }
