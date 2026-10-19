@@ -88,8 +88,8 @@ export function ChatPage() {
     : (newChatProvider ?? settings.data?.provider ?? "workers-ai");
 
   const currentModel = conversation.data?.conversation
-    ? (conversation.data.conversation.model_override ?? settings.data?.model ?? "@cf/meta/llama-3.3-70b-instruct-fp8-fast")
-    : (newChatModel ?? settings.data?.model ?? "@cf/meta/llama-3.3-70b-instruct-fp8-fast");
+    ? (conversation.data.conversation.model_override ?? settings.data?.model ?? "@cf/zai-org/glm-4.7-flash")
+    : (newChatModel ?? settings.data?.model ?? "@cf/zai-org/glm-4.7-flash");
 
   const isCustomModel = conversation.data?.conversation
     ? Boolean(conversation.data.conversation.provider_override || conversation.data.conversation.model_override)
@@ -116,8 +116,8 @@ export function ChatPage() {
           conversation_id: convId ?? undefined,
           message: opts.retry ? "retry" : text,
           retry: opts.retry,
-          provider: !convId ? (newChatProvider ?? undefined) : undefined,
-          model: !convId ? (newChatModel ?? undefined) : undefined,
+          provider: convId ? (conversation.data?.conversation?.provider_override ?? undefined) : (newChatProvider ?? undefined),
+          model: convId ? (conversation.data?.conversation?.model_override ?? undefined) : (newChatModel ?? undefined),
         },
         (event) => {
           switch (event.type) {
@@ -278,36 +278,12 @@ export function ChatPage() {
 
 const POPULAR_MODELS = [
   {
-    name: "Claude 3.7 Sonnet",
-    provider: "anthropic",
-    model: "claude-3-7-sonnet-20250219",
-    badge: "Claude Pro / OAuth",
-    desc: "Top coding, reasoning & agents",
-    color: "border-amber-500/30 bg-amber-500/10 text-amber-500",
-  },
-  {
-    name: "Claude 3.5 Sonnet",
-    provider: "anthropic",
-    model: "claude-3-5-sonnet-20241022",
-    badge: "Claude Pro / OAuth",
-    desc: "Fast, reliable intelligence benchmark",
-    color: "border-amber-500/30 bg-amber-500/10 text-amber-500",
-  },
-  {
-    name: "Gemini 2.0 Flash",
-    provider: "gemini",
-    model: "gemini-2.0-flash",
-    badge: "Google / Antigravity",
-    desc: "Ultra-fast response with huge context",
-    color: "border-blue-500/30 bg-blue-500/10 text-blue-500",
-  },
-  {
-    name: "Gemini 2.5 Pro",
-    provider: "gemini",
-    model: "gemini-2.5-pro",
-    badge: "Google / Antigravity",
-    desc: "Advanced deep reasoning & multimodal",
-    color: "border-blue-500/30 bg-blue-500/10 text-blue-500",
+    name: "GLM-4.7 Flash",
+    provider: "workers-ai",
+    model: "@cf/zai-org/glm-4.7-flash",
+    badge: "Cloudflare (Original)",
+    desc: "131k context, function calling, native edge inference",
+    color: "border-emerald-500/30 bg-emerald-500/10 text-emerald-500",
   },
   {
     name: "Llama 3.3 70B",
@@ -323,7 +299,23 @@ const POPULAR_MODELS = [
     model: "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
     badge: "Cloudflare (Free)",
     desc: "Deep reasoning & chain-of-thought",
-    color: "border-emerald-500/30 bg-emerald-500/10 text-emerald-500",
+    color: "border-teal-500/30 bg-teal-500/10 text-teal-500",
+  },
+  {
+    name: "Gemini 2.0 Flash",
+    provider: "gemini",
+    model: "gemini-2.0-flash",
+    badge: "Google Free (1,500/d)",
+    desc: "Ultra-fast response with huge 1M context",
+    color: "border-blue-500/30 bg-blue-500/10 text-blue-500",
+  },
+  {
+    name: "Gemini 2.5 Pro",
+    provider: "gemini",
+    model: "gemini-2.5-pro",
+    badge: "Google Deep Reasoning",
+    desc: "Advanced deep reasoning & multimodal logic",
+    color: "border-blue-500/30 bg-blue-500/10 text-blue-500",
   },
   {
     name: "Groq Llama 3.3 70B",
@@ -332,6 +324,14 @@ const POPULAR_MODELS = [
     badge: "Groq LPU Free",
     desc: "Blazing ~300 tokens/sec speed",
     color: "border-purple-500/30 bg-purple-500/10 text-purple-500",
+  },
+  {
+    name: "Claude 3.5 / 3.7 Sonnet",
+    provider: "anthropic",
+    model: "claude-sonnet-4-5-20250929",
+    badge: "Claude Pro / API",
+    desc: "Top coding, reasoning & agents",
+    color: "border-amber-500/30 bg-amber-500/10 text-amber-500",
   },
   {
     name: "FreeLLMAPI Auto",
@@ -345,8 +345,9 @@ const POPULAR_MODELS = [
 
 function getModelDisplayName(providerId?: string | null, modelId?: string | null): string {
   if (!modelId) return "Default Model";
+  if (modelId.includes("glm-4.7-flash")) return "GLM-4.7 Flash";
   if (modelId.includes("claude-3-7-sonnet")) return "Claude 3.7 Sonnet";
-  if (modelId.includes("claude-3-5-sonnet")) return "Claude 3.5 Sonnet";
+  if (modelId.includes("claude-sonnet-4-5") || modelId.includes("claude-3-5-sonnet")) return "Claude 3.5/3.7 Sonnet";
   if (modelId.includes("claude-3-5-haiku")) return "Claude 3.5 Haiku";
   if (modelId.includes("gemini-2.5-pro")) return "Gemini 2.5 Pro";
   if (modelId.includes("gemini-2.0-flash")) return "Gemini 2.0 Flash";
@@ -389,8 +390,8 @@ function ConversationModelSwitcher({
     ? (conversation.provider_override ?? settings.data?.provider ?? "workers-ai")
     : (newChatProvider ?? settings.data?.provider ?? "workers-ai");
   const activeModel = conversation
-    ? (conversation.model_override ?? settings.data?.model ?? "@cf/meta/llama-3.3-70b-instruct-fp8-fast")
-    : (newChatModel ?? settings.data?.model ?? "@cf/meta/llama-3.3-70b-instruct-fp8-fast");
+    ? (conversation.model_override ?? settings.data?.model ?? "@cf/zai-org/glm-4.7-flash")
+    : (newChatModel ?? settings.data?.model ?? "@cf/zai-org/glm-4.7-flash");
   const isOverridden = conversation
     ? Boolean(conversation.provider_override || conversation.model_override)
     : Boolean(newChatProvider || newChatModel);

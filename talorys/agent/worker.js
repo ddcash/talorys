@@ -62188,6 +62188,7 @@ var externalKeysSchema = external_exports.object({
   anthropicOAuthRefreshToken: external_exports.string().optional(),
   anthropicClientId: external_exports.string().optional(),
   anthropicClientSecret: external_exports.string().optional(),
+  anthropicAuthMode: external_exports.enum(["apikey", "oauth"]).optional(),
   // Google / Antigravity OAuth
   googleOAuthToken: external_exports.string().optional(),
   googleRefreshToken: external_exports.string().optional(),
@@ -62195,6 +62196,7 @@ var externalKeysSchema = external_exports.object({
   googleClientSecret: external_exports.string().optional(),
   googleTokenExpiry: external_exports.number().optional(),
   googleUserEmail: external_exports.string().optional(),
+  geminiAuthMode: external_exports.enum(["apikey", "oauth"]).optional(),
   // FreeLLMAPI & Free Tier Providers
   freellmapiEndpoint: external_exports.string().optional(),
   freellmapiKey: external_exports.string().optional(),
@@ -62669,8 +62671,12 @@ var FREE_LLM_PROVIDERS = [
     defaultBaseUrl: "builtin://cloudflare",
     requiresKey: false,
     freeTierNote: "10,000 free neurons / day built directly into Cloudflare",
-    defaultModel: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
-    popularModels: ["@cf/meta/llama-3.3-70b-instruct-fp8-fast", "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b"],
+    defaultModel: "@cf/zai-org/glm-4.7-flash",
+    popularModels: [
+      "@cf/zai-org/glm-4.7-flash",
+      "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+      "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b"
+    ],
     docUrl: "https://dash.cloudflare.com"
   },
   // --- FreeLLMAPI Aggregator & Community Credit Routers ---
@@ -67224,14 +67230,31 @@ var ToolExecutor = class {
     if (tool5.maxCallsPerTurn !== void 0 && used >= tool5.maxCallsPerTurn) {
       throw new ToolError(`"${name11}" was already used ${used} times in this request. Do not call it again.`);
     }
-    const parsed = tool5.input.safeParse(rawInput ?? {});
+    let unwrappedInput = rawInput;
+    if (typeof unwrappedInput === "string") {
+      try {
+        unwrappedInput = JSON.parse(unwrappedInput);
+      } catch {
+      }
+    }
+    if (unwrappedInput && typeof unwrappedInput === "object" && !Array.isArray(unwrappedInput)) {
+      const obj = unwrappedInput;
+      if (obj.parameters && typeof obj.parameters === "object" && !Array.isArray(obj.parameters)) {
+        unwrappedInput = obj.parameters;
+      } else if (obj.arguments && typeof obj.arguments === "object" && !Array.isArray(obj.arguments)) {
+        unwrappedInput = obj.arguments;
+      } else if (obj.input && typeof obj.input === "object" && !Array.isArray(obj.input)) {
+        unwrappedInput = obj.input;
+      }
+    }
+    const parsed = tool5.input.safeParse(unwrappedInput ?? {});
     if (!parsed.success) {
       const issue2 = parsed.error.issues[0];
       throw new ToolError(`Invalid input${issue2 ? ` at "${issue2.path.join(".")}": ${issue2.message}` : ""}.`);
     }
     const signature = `${name11}:${stableStringify(parsed.data)}`;
     const repeats = this.signatures.get(signature) ?? 0;
-    if (repeats >= 1) {
+    if (repeats >= 2) {
       throw new ToolError("This exact call was already made in this request. Use the earlier result instead of repeating it.");
     }
     this.calls++;
@@ -67655,18 +67678,52 @@ var memoryTools = [
     permission: "write",
     maxCallsPerTurn: 3,
     input: external_exports.object({
-      content: external_exports.string().min(3).max(1e3),
-      category: external_exports.enum(MEMORY_CATEGORIES).optional()
+      content: external_exports.string().min(1).max(1e3),
+      category: external_exports.preprocess((val) => {
+        if (typeof val === "string") {
+          const lower = val.toLowerCase().trim();
+          if (lower.startsWith("pref")) return "preference";
+          if (lower.startsWith("fact") || lower.startsWith("info")) return "fact";
+          if (lower.startsWith("goal") || lower.startsWith("plan")) return "goal";
+          if (lower.startsWith("proj")) return "project";
+          if (lower.startsWith("habit") || lower.startsWith("routine")) return "habit";
+          if (lower.startsWith("pers") || lower.startsWith("user")) return "person";
+          return "other";
+        }
+        return "other";
+      }, external_exports.enum(MEMORY_CATEGORIES)).optional()
     }),
     label: /* @__PURE__ */ __name(() => `Saving to memory`, "label"),
     execute: /* @__PURE__ */ __name(async (i2, ctx) => {
-      const { memory, superseded, reviews } = await ctx.services.memoryHistory.create({ content: i2.content, category: i2.category ?? "other", source: "agent" });
-      ctx.services.activity.record("memory.created", `Agent remembered: ${memory.content}`);
-      return {
-        remembered: { id: memory.id, content: memory.content, category: memory.category },
-        ...superseded.length ? { now_historical: superseded.map((m) => ({ id: m.id, content: m.content })) } : {},
-        ...reviews.length ? { needs_owner_review: "This may conflict with an older memory; both are kept until the owner reviews it on the Memory page." } : {}
-      };
+      try {
+        const { memory, superseded, reviews } = await ctx.services.memoryHistory.create({
+          content: i2.content,
+          category: i2.category ?? "other",
+          source: "agent"
+        });
+        try {
+          ctx.services.activity.record("memory.created", `Agent remembered: ${memory.content}`);
+        } catch {
+        }
+        return {
+          remembered: { id: memory.id, content: memory.content, category: memory.category },
+          ...superseded.length ? { now_historical: superseded.map((m) => ({ id: m.id, content: m.content })) } : {},
+          ...reviews.length ? { needs_owner_review: "This may conflict with an older memory; both are kept until the owner reviews it on the Memory page." } : {}
+        };
+      } catch (err) {
+        const memory = ctx.services.memories.create({
+          content: i2.content,
+          category: i2.category ?? "other",
+          source: "agent"
+        });
+        try {
+          ctx.services.activity.record("memory.created", `Agent remembered: ${memory.content}`);
+        } catch {
+        }
+        return {
+          remembered: { id: memory.id, content: memory.content, category: memory.category }
+        };
+      }
     }, "execute")
   }),
   defineTool({
@@ -68497,11 +68554,25 @@ var AgentRunner = class {
         model: conversation.model_override || settings.model
       };
       const candidates = [primaryCandidate];
-      if (settings.autoFailover && settings.fallbacks?.length) {
+      if (settings.autoFailover !== false && settings.fallbacks?.length) {
         for (const fb of settings.fallbacks) {
           if (fb.provider !== primaryCandidate.provider || fb.model !== primaryCandidate.model) {
             candidates.push(fb);
           }
+        }
+      }
+      if (settings.autoFailover !== false) {
+        if (!candidates.some((c) => c.provider === "workers-ai" && c.model === "@cf/zai-org/glm-4.7-flash")) {
+          candidates.push({ provider: "workers-ai", model: "@cf/zai-org/glm-4.7-flash" });
+        }
+        if (!candidates.some((c) => c.provider === "workers-ai" && c.model === "@cf/meta/llama-3.3-70b-instruct-fp8-fast")) {
+          candidates.push({ provider: "workers-ai", model: "@cf/meta/llama-3.3-70b-instruct-fp8-fast" });
+        }
+        if (!candidates.some((c) => c.provider === "workers-ai" && c.model === "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b")) {
+          candidates.push({ provider: "workers-ai", model: "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b" });
+        }
+        if (!candidates.some((c) => c.provider === "pollinations")) {
+          candidates.push({ provider: "pollinations", model: "openai" });
         }
       }
       let streamedAnyText = false;
@@ -68527,8 +68598,8 @@ var AgentRunner = class {
           const todayCost = todayUsage.cost_usd_estimate ?? 0;
           const requestExceeded = budget.maxDailyRequests > 0 && todayRequests >= budget.maxDailyRequests;
           const tokenExceeded = budget.maxDailyTokens > 0 && todayTokens >= budget.maxDailyTokens;
-          const freeTierViolation = budget.freeTierOnly && currentProvider.billable;
-          const costExceeded = budget.maxMonthlyCostUsd >= 0 && todayCost > budget.maxMonthlyCostUsd;
+          const freeTierViolation = budget.freeTierOnly && currentProvider.billable && currentProvider.id !== "workers-ai";
+          const costExceeded = budget.maxMonthlyCostUsd > 0 && todayCost >= budget.maxMonthlyCostUsd;
           const budgetHit = requestExceeded || tokenExceeded || freeTierViolation || costExceeded;
           if (budgetHit) {
             const next = candidates[i2 + 1];
@@ -68601,7 +68672,9 @@ var AgentRunner = class {
             throw err;
           }
           const next = candidates[i2 + 1];
-          const notice = `*[Notice: ${candidate.provider} quota/rate limit reached. Failing over to ${next.provider} (${next.model})...]*
+          const rawErr = err instanceof Error ? err.message : String(err);
+          const brief = rawErr.length > 80 ? rawErr.slice(0, 77) + "..." : rawErr;
+          const notice = `*[Notice: ${candidate.provider} (${brief}). Failing over to ${next.provider} (${next.model})...]*
 
 `;
           yield { type: "text", delta: notice };
@@ -73334,1097 +73407,6 @@ skillsRoutes.delete("/skills/:id", (c) => {
   c.env.agent.services.skills.delete(c.req.param("id"));
   return c.json({ deleted: true });
 });
-
-// src/api/routes/models.ts
-var DEFAULT_CLOUDFLARE_MODELS = [
-  {
-    id: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
-    name: "Llama 3.3 70B Instruct (FP8 Fast)",
-    description: "Meta's flagship 70B model optimized for fast inference with tool calling support.",
-    provider: "cloudflare",
-    tags: ["recommended", "tool-calling", "fast", "general"],
-    recommended: true
-  },
-  {
-    id: "@cf/meta/llama-3.1-70b-instruct",
-    name: "Llama 3.1 70B Instruct",
-    description: "High-capability open model with 128k context and function calling.",
-    provider: "cloudflare",
-    tags: ["tool-calling", "general"]
-  },
-  {
-    id: "@cf/meta/llama-3.1-8b-instruct",
-    name: "Llama 3.1 8B Instruct",
-    description: "Fast, efficient 8B model suitable for daily assistance and rapid responses.",
-    provider: "cloudflare",
-    tags: ["fast", "tool-calling"]
-  },
-  {
-    id: "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
-    name: "DeepSeek R1 Distill Qwen 32B",
-    description: "Advanced reasoning model with chain-of-thought capabilities.",
-    provider: "cloudflare",
-    tags: ["reasoning", "coding", "math"]
-  },
-  {
-    id: "@cf/meta/llama-3.2-3b-instruct",
-    name: "Llama 3.2 3B Instruct",
-    description: "Compact and ultra-low latency model for simple tasks.",
-    provider: "cloudflare",
-    tags: ["fast", "lightweight"]
-  },
-  {
-    id: "@cf/meta/llama-3.2-11b-vision-instruct",
-    name: "Llama 3.2 11B Vision Instruct",
-    description: "Multimodal text and image understanding model.",
-    provider: "cloudflare",
-    tags: ["vision", "multimodal"]
-  },
-  {
-    id: "@cf/qwen/qwen2.5-7b-instruct",
-    name: "Qwen 2.5 7B Instruct",
-    description: "Excellent multilingual and coding capabilities from Alibaba Cloud.",
-    provider: "cloudflare",
-    tags: ["coding", "multilingual"]
-  },
-  {
-    id: "@cf/mistral/mistral-7b-instruct-v0.2",
-    name: "Mistral 7B Instruct v0.2",
-    description: "Balanced general-purpose 7B model.",
-    provider: "cloudflare",
-    tags: ["general"]
-  },
-  {
-    id: "@cf/google/gemma-7b-it",
-    name: "Google Gemma 7B IT",
-    description: "Lightweight open model trained on Google technology.",
-    provider: "cloudflare",
-    tags: ["general"]
-  }
-];
-var PRESET_MODELS = {
-  cloudflare: DEFAULT_CLOUDFLARE_MODELS,
-  anthropic: [
-    {
-      id: "claude-3-7-sonnet-20250219",
-      name: "Claude 3.7 Sonnet",
-      description: "Hybrid reasoning model capable of standard chat and extended thinking.",
-      provider: "anthropic",
-      tags: ["recommended", "reasoning", "coding", "tool-calling"],
-      recommended: true
-    },
-    {
-      id: "claude-3-5-sonnet-20241022",
-      name: "Claude 3.5 Sonnet",
-      description: "Industry-leading intelligence for coding, analysis, and nuance.",
-      provider: "anthropic",
-      tags: ["coding", "analysis", "tool-calling"]
-    },
-    {
-      id: "claude-3-5-haiku-20241022",
-      name: "Claude 3.5 Haiku",
-      description: "Lightning-fast model with near Sonnet-level speed and responsiveness.",
-      provider: "anthropic",
-      tags: ["fast", "tool-calling"]
-    }
-  ],
-  openai: [
-    {
-      id: "gpt-4o",
-      name: "GPT-4o",
-      description: "OpenAI flagship omni model for multimodal understanding and complex tasks.",
-      provider: "openai",
-      tags: ["recommended", "tool-calling", "general"],
-      recommended: true
-    },
-    {
-      id: "gpt-4o-mini",
-      name: "GPT-4o Mini",
-      description: "Fast, cost-efficient model for lightweight daily tasks.",
-      provider: "openai",
-      tags: ["fast", "tool-calling"]
-    },
-    {
-      id: "o3-mini",
-      name: "o3-mini",
-      description: "High-speed reasoning model specialized in STEM, coding, and math.",
-      provider: "openai",
-      tags: ["reasoning", "coding", "math"]
-    }
-  ],
-  openrouter: [
-    {
-      id: "anthropic/claude-3.7-sonnet",
-      name: "Claude 3.7 Sonnet (via OpenRouter)",
-      description: "Access Anthropic Claude 3.7 Sonnet via OpenRouter gateway.",
-      provider: "openrouter",
-      tags: ["recommended", "reasoning", "coding"],
-      recommended: true
-    },
-    {
-      id: "openai/gpt-4o",
-      name: "GPT-4o (via OpenRouter)",
-      description: "Access OpenAI GPT-4o via OpenRouter gateway.",
-      provider: "openrouter",
-      tags: ["general", "tool-calling"]
-    },
-    {
-      id: "deepseek/deepseek-r1",
-      name: "DeepSeek R1 (via OpenRouter)",
-      description: "Open reasoning model with chain-of-thought capabilities.",
-      provider: "openrouter",
-      tags: ["reasoning", "math", "coding"]
-    },
-    {
-      id: "google/gemini-2.0-flash-001",
-      name: "Gemini 2.0 Flash (via OpenRouter)",
-      description: "Next-gen low-latency multimodal model.",
-      provider: "openrouter",
-      tags: ["fast", "multimodal"]
-    },
-    {
-      id: "meta-llama/llama-3.3-70b-instruct",
-      name: "Llama 3.3 70B (via OpenRouter)",
-      description: "Meta open-weights flagship via high-throughput providers.",
-      provider: "openrouter",
-      tags: ["general"]
-    }
-  ],
-  google: [
-    {
-      id: "gemini-2.0-flash",
-      name: "Gemini 2.0 Flash",
-      description: "Ultra-fast multimodal model with comprehensive tool support.",
-      provider: "google",
-      tags: ["recommended", "fast", "multimodal", "tool-calling"],
-      recommended: true
-    },
-    {
-      id: "gemini-2.5-pro",
-      name: "Gemini 2.5 Pro",
-      description: "State-of-the-art model for complex logic, coding, and deep reasoning.",
-      provider: "google",
-      tags: ["reasoning", "coding", "tool-calling"]
-    },
-    {
-      id: "gemini-1.5-pro",
-      name: "Gemini 1.5 Pro",
-      description: "Massive 2M token context window model for deep document analysis.",
-      provider: "google",
-      tags: ["large-context", "analysis"]
-    },
-    {
-      id: "gemini-1.5-flash",
-      name: "Gemini 1.5 Flash",
-      description: "Lightweight, highly capable everyday model.",
-      provider: "google",
-      tags: ["fast", "general"]
-    }
-  ],
-  freellmapi: [
-    {
-      id: "freellmapi/auto",
-      name: "FreeLLMAPI Auto Router (Best Free Model)",
-      description: "Automatically routes requests across 34 free providers and 635 models based on capability and speed.",
-      provider: "freellmapi",
-      tags: ["recommended", "free", "router", "auto-failover"],
-      recommended: true
-    },
-    {
-      id: "freellmapi/fusion",
-      name: "FreeLLMAPI Virtual Fusion (Multi-Model Consensus)",
-      description: "Fans out prompts to multiple free models in parallel and synthesizes a single consensus answer.",
-      provider: "freellmapi",
-      tags: ["free", "fusion", "reasoning"]
-    },
-    {
-      id: "gemini-2.0-flash",
-      name: "Gemini 2.0 Flash (FreeLLMAPI Free Tier)",
-      description: "Google Gemini 2.0 Flash via FreeLLMAPI free pool.",
-      provider: "freellmapi",
-      tags: ["free", "fast", "multimodal"]
-    },
-    {
-      id: "llama-3.3-70b-versatile",
-      name: "Llama 3.3 70B (FreeLLMAPI)",
-      description: "Meta 70B high-reasoning model via FreeLLMAPI free allocation.",
-      provider: "freellmapi",
-      tags: ["free", "general", "tool-calling"]
-    },
-    {
-      id: "deepseek-chat",
-      name: "DeepSeek V3 (FreeLLMAPI)",
-      description: "DeepSeek general and coding model via FreeLLMAPI.",
-      provider: "freellmapi",
-      tags: ["free", "coding"]
-    }
-  ],
-  groq: [
-    {
-      id: "llama-3.3-70b-versatile",
-      name: "Llama 3.3 70B Versatile",
-      description: "Free high-speed 70B model running at ~250 tokens/sec on Groq LPUs.",
-      provider: "groq",
-      tags: ["recommended", "free", "fast", "tool-calling"],
-      recommended: true
-    },
-    {
-      id: "llama-3.1-8b-instant",
-      name: "Llama 3.1 8B Instant",
-      description: "Ultra-low latency 8B model running at ~800 tokens/sec on Groq.",
-      provider: "groq",
-      tags: ["free", "ultra-fast"]
-    },
-    {
-      id: "mixtral-8x7b-32768",
-      name: "Mixtral 8x7B (32k context)",
-      description: "Mistral MoE architecture model with 32k context on Groq free tier.",
-      provider: "groq",
-      tags: ["free", "moe"]
-    }
-  ],
-  cerebras: [
-    {
-      id: "llama-3.3-70b",
-      name: "Llama 3.3 70B",
-      description: "World-record 2,100+ tokens/sec inference speed on Cerebras Wafer-Scale Engine.",
-      provider: "cerebras",
-      tags: ["recommended", "free", "ultra-fast"],
-      recommended: true
-    },
-    {
-      id: "llama-3.1-8b",
-      name: "Llama 3.1 8B",
-      description: "2,800+ tokens/sec instantaneous inference speed on Cerebras free tier.",
-      provider: "cerebras",
-      tags: ["free", "ultra-fast"]
-    }
-  ],
-  mistral: [
-    {
-      id: "mistral-small-latest",
-      name: "Mistral Small Latest",
-      description: "Mistral's cost-effective general intelligence model on free tier.",
-      provider: "mistral",
-      tags: ["recommended", "free", "general"],
-      recommended: true
-    },
-    {
-      id: "codestral-latest",
-      name: "Codestral 22B",
-      description: "Mistral's specialized coding model for software engineering.",
-      provider: "mistral",
-      tags: ["free", "coding"]
-    }
-  ],
-  pollinations: [
-    {
-      id: "openai",
-      name: "Pollinations OpenAI (Zero Key)",
-      description: "Instant 100% free AI model, requires no API key or account.",
-      provider: "pollinations",
-      tags: ["recommended", "free", "zero-key"],
-      recommended: true
-    },
-    {
-      id: "mistral",
-      name: "Pollinations Mistral (Zero Key)",
-      description: "Fast free Mistral model with zero authentication required.",
-      provider: "pollinations",
-      tags: ["free", "zero-key"]
-    },
-    {
-      id: "deepseek",
-      name: "Pollinations DeepSeek (Zero Key)",
-      description: "DeepSeek reasoning model accessible with zero credentials.",
-      provider: "pollinations",
-      tags: ["free", "reasoning", "zero-key"]
-    }
-  ],
-  nvidia: [
-    {
-      id: "meta/llama-3.3-70b-instruct",
-      name: "NVIDIA NIM Llama 3.3 70B",
-      description: "High-performance inference microservice with free developer credits.",
-      provider: "nvidia",
-      tags: ["recommended", "free", "fast"],
-      recommended: true
-    },
-    {
-      id: "nvidia/llama-3.1-nemotron-70b-instruct",
-      name: "Nemotron 70B Instruct",
-      description: "NVIDIA's customized high-reasoning model optimized for alignment.",
-      provider: "nvidia",
-      tags: ["free", "reasoning"]
-    }
-  ],
-  "github-models": [
-    {
-      id: "gpt-4o",
-      name: "GitHub Models GPT-4o",
-      description: "Free developer playground access to GPT-4o via GitHub Personal Access Token.",
-      provider: "github-models",
-      tags: ["recommended", "free", "multimodal"],
-      recommended: true
-    },
-    {
-      id: "gpt-4o-mini",
-      name: "GitHub Models GPT-4o-mini",
-      description: "Fast and lightweight GPT-4o model via GitHub Models.",
-      provider: "github-models",
-      tags: ["free", "fast"]
-    }
-  ],
-  siliconflow: [
-    {
-      id: "deepseek-ai/DeepSeek-V3",
-      name: "DeepSeek V3 (SiliconFlow)",
-      description: "Free SiliconCloud tier for DeepSeek V3 general intelligence.",
-      provider: "siliconflow",
-      tags: ["recommended", "free", "coding"],
-      recommended: true
-    },
-    {
-      id: "deepseek-ai/DeepSeek-R1",
-      name: "DeepSeek R1 (SiliconFlow)",
-      description: "Full chain-of-thought open reasoning model on SiliconCloud.",
-      provider: "siliconflow",
-      tags: ["free", "reasoning"]
-    }
-  ],
-  zhipu: [
-    {
-      id: "glm-4-flash",
-      name: "GLM-4 Flash (Z.ai)",
-      description: "Completely free ultra-fast Chinese/English bilingual foundation model.",
-      provider: "zhipu",
-      tags: ["recommended", "free", "fast"],
-      recommended: true
-    }
-  ]
-};
-var modelsRoutes = new Hono3();
-modelsRoutes.get("/models/cloudflare", async (c) => {
-  const settings = c.env.agent.services.settings.get();
-  const cfToken = settings.externalKeys?.cloudflareToken;
-  const cfAccount = settings.externalKeys?.cloudflareAccountId;
-  if (cfToken && cfAccount) {
-    try {
-      const res = await fetch(
-        `https://api.cloudflare.com/client/v4/accounts/${cfAccount}/ai/models/search?task=Text%20Generation&per_page=100`,
-        {
-          headers: {
-            Authorization: `Bearer ${cfToken}`,
-            "Content-Type": "application/json"
-          }
-        }
-      );
-      if (res.ok) {
-        const data = await res.json();
-        if (data.result && Array.isArray(data.result) && data.result.length > 0) {
-          const dynamicModels = data.result.map((m) => {
-            const isRec = m.id.includes("llama-3.3-70b-instruct-fp8-fast");
-            const tags = [];
-            if (isRec) tags.push("recommended");
-            if (m.id.includes("fast")) tags.push("fast");
-            if (m.id.includes("r1") || m.id.includes("reasoning")) tags.push("reasoning");
-            if (m.id.includes("vision")) tags.push("vision");
-            if (m.id.includes("llama-3.1") || m.id.includes("llama-3.3")) tags.push("tool-calling");
-            return {
-              id: m.id,
-              name: m.name || m.id,
-              description: m.description,
-              provider: "cloudflare",
-              tags,
-              recommended: isRec
-            };
-          });
-          return c.json({ models: dynamicModels, source: "cloudflare-live" });
-        }
-      }
-    } catch {
-    }
-  }
-  return c.json({ models: DEFAULT_CLOUDFLARE_MODELS, source: "curated" });
-});
-modelsRoutes.get("/models/presets", (c) => {
-  return c.json({ presets: PRESET_MODELS });
-});
-modelsRoutes.get("/models/providers", (c) => {
-  return c.json({ providers: FREE_LLM_PROVIDERS });
-});
-
-// src/api/routes/marketplace.ts
-var MARKETPLACE_MCPS = [
-  {
-    id: "inkstone",
-    name: "Inkstone Knowledge Base",
-    author: "Cloudflare",
-    description: "Serverless long-term memory and knowledge base running on Cloudflare Workers and Vectorize.",
-    category: "memory",
-    default_url: "https://inkstone-cf.r-cash88.workers.dev/mcp",
-    needs_auth: false,
-    tags: ["memory", "knowledge", "cloudflare", "vectorize"],
-    documentation_url: "https://github.com/ddcash/inkstone"
-  },
-  {
-    id: "github",
-    name: "GitHub Official MCP",
-    author: "Model Context Protocol",
-    description: "Search repositories, read code, view issues, inspect pull requests, and commit changes.",
-    category: "developer",
-    default_url: "https://api.githubcopilot.com/mcp",
-    needs_auth: true,
-    auth_hint: "Personal Access Token (classic or fine-grained with repo scope)",
-    tags: ["git", "code", "github", "issues", "pr"],
-    documentation_url: "https://github.com/modelcontextprotocol/servers/tree/main/src/github"
-  },
-  {
-    id: "brave-search",
-    name: "Brave Search",
-    author: "Brave Software",
-    description: "Real-time web search and local business queries via the Brave Search API.",
-    category: "search",
-    default_url: "https://api.search.brave.com/mcp",
-    needs_auth: true,
-    auth_hint: "Brave Search API Key from api.search.brave.com",
-    tags: ["search", "web", "news"],
-    documentation_url: "https://github.com/modelcontextprotocol/servers/tree/main/src/brave-search"
-  },
-  {
-    id: "fetch",
-    name: "Fetch Web Scraper",
-    author: "Model Context Protocol",
-    description: "Converts any public web page into clean markdown for reading and analysis.",
-    category: "search",
-    default_url: "https://fetch.mcp.run",
-    needs_auth: false,
-    tags: ["web", "scrape", "markdown", "reader"],
-    documentation_url: "https://github.com/modelcontextprotocol/servers/tree/main/src/fetch"
-  },
-  {
-    id: "postgres",
-    name: "PostgreSQL Inspector",
-    author: "Model Context Protocol",
-    description: "Read-only database querying, schema introspection, and performance analysis.",
-    category: "database",
-    default_url: "http://localhost:5433/mcp",
-    needs_auth: true,
-    auth_hint: "Postgres connection string or server bearer token",
-    tags: ["sql", "postgres", "database"],
-    documentation_url: "https://github.com/modelcontextprotocol/servers/tree/main/src/postgres"
-  },
-  {
-    id: "memory",
-    name: "Knowledge Graph Memory",
-    author: "Model Context Protocol",
-    description: "Graph-based persistent memory organizing entities, relations, and observations.",
-    category: "memory",
-    default_url: "https://memory.mcp.run",
-    needs_auth: false,
-    tags: ["memory", "graph", "relations"],
-    documentation_url: "https://github.com/modelcontextprotocol/servers/tree/main/src/memory"
-  },
-  {
-    id: "cloudflare-bindings",
-    name: "Cloudflare Developer Platform",
-    author: "Cloudflare",
-    description: "Inspect Workers, KV namespaces, D1 databases, R2 buckets, and Hyperdrive configs.",
-    category: "developer",
-    default_url: "https://api.cloudflare.com/client/v4/mcp",
-    needs_auth: true,
-    auth_hint: "Cloudflare API Token with Workers & Storage read permissions",
-    tags: ["cloudflare", "workers", "d1", "r2", "kv"],
-    documentation_url: "https://developers.cloudflare.com/workers-ai/"
-  },
-  {
-    id: "slack",
-    name: "Slack Workspace Connector",
-    author: "Model Context Protocol",
-    description: "Search Slack workspace history, read public channels, and view user threads.",
-    category: "productivity",
-    default_url: "https://slack.mcp.run",
-    needs_auth: true,
-    auth_hint: "Slack Bot User OAuth Token (xoxb-...)",
-    tags: ["chat", "slack", "team", "collaboration"],
-    documentation_url: "https://github.com/modelcontextprotocol/servers/tree/main/src/slack"
-  }
-];
-var MARKETPLACE_SKILLS = [
-  {
-    id: "appsec-auditor",
-    name: "Application Security & Vulnerability Auditor",
-    author: "Agency Security",
-    category: "coding",
-    description: "Hunts hardcoded secrets, injection sinks, broken access controls, and unsafe dependencies.",
-    instructions: "When reviewing code or investigating systems:\n1. Threat Model: Map trust boundaries and user-controlled inputs.\n2. Vulnerability Hunt: Check for OWASP Top 10, CWE-79 (XSS), CWE-89 (SQLi), CWE-94 (Code Injection).\n3. Row-Level & Secret Checks: Verify no secrets or credentials appear in repo files.\n4. Deliver findings mapped to CWEs with remediation diffs.",
-    tools_json: JSON.stringify(["code_review", "security_scan"]),
-    tags: ["security", "audit", "owasp", "cwe"]
-  },
-  {
-    id: "cloud-architect",
-    name: "Cloud Security & Zero-Trust Architect",
-    author: "Agency Cloud",
-    category: "coding",
-    description: "Designs resilient, least-privilege cloud architectures on Cloudflare, AWS, and GCP.",
-    instructions: "When designing or reviewing cloud architectures:\n1. Apply Zero-Trust principles: verify explicitly, least-privilege access, assume breach.\n2. Infrastructure as Code: prefer declarative configs and immutable deployments.\n3. Data Protection: encrypt in transit and at rest, manage key rotation, isolate databases.",
-    tools_json: JSON.stringify(["cloud_audit"]),
-    tags: ["cloud", "architecture", "zero-trust", "cloudflare"]
-  },
-  {
-    id: "deep-researcher",
-    name: "Deep Intelligence & Knowledge Synthesizer",
-    author: "Research Labs",
-    category: "research",
-    description: "Exhaustively queries internal knowledge bases, memories, notes, and external MCP tools.",
-    instructions: "When researching an inquiry:\n1. Query all connected knowledge sources and memories first.\n2. Cross-reference facts across notes and search tools.\n3. Synthesize structured findings with citations and confidence levels.\n4. Propose durable insights to store in memory.",
-    tools_json: JSON.stringify(["semantic_search", "notes_search", "mcp:*"]),
-    tags: ["research", "synthesis", "memory", "facts"]
-  },
-  {
-    id: "product-manager",
-    name: "Product Strategist & Roadmapper",
-    author: "Product Guild",
-    category: "productivity",
-    description: "Transforms user goals into crisp PRDs, user stories, milestone roadmaps, and acceptance criteria.",
-    instructions: "When helping plan product features:\n1. Define user problem, hypothesis, and expected outcome.\n2. Write user stories with Given/When/Then acceptance criteria.\n3. Prioritize by impact vs effort (MoSCoW or RICE).\n4. Convert action items into tasks with projects and due dates.",
-    tools_json: JSON.stringify(["tasks_create", "projects_create"]),
-    tags: ["product", "strategy", "roadmap", "user-stories"]
-  },
-  {
-    id: "incident-responder",
-    name: "Incident Response & Forensics Specialist",
-    author: "SecOps",
-    category: "coding",
-    description: "Coordinates breach response, identifies IOCs, preserves evidence, and authors post-mortems.",
-    instructions: "When handling an operational or security incident:\n1. Establish timeline: identify first indicator of compromise (IOC).\n2. Containment: isolate affected services or revoked tokens.\n3. Root Cause Analysis: trace how access was gained.\n4. Author clear post-mortem with preventative actions.",
-    tools_json: JSON.stringify(["audit_log"]),
-    tags: ["secops", "incident", "forensics", "postmortem"]
-  },
-  {
-    id: "technical-writer",
-    name: "Technical Documentation Specialist",
-    author: "DocOps",
-    category: "writing",
-    description: "Writes world-class API references, architecture decision records (ADRs), and developer guides.",
-    instructions: "When authoring documentation:\n1. Structure with executive overview, prerequisite diagram, and runnable code samples.\n2. Keep prose active, precise, and unambiguous.\n3. Format tables for options/parameters and callouts for critical warnings.",
-    tools_json: JSON.stringify(["notes_create"]),
-    tags: ["documentation", "writing", "adr", "api"]
-  }
-];
-var MARKETPLACE_RULES = [
-  {
-    id: "concise-high-signal",
-    title: "Concise & High-Signal Persona",
-    author: "Talorys Core",
-    category: "persona",
-    description: "Get straight to the answer with zero pleasantries, preamble, or boilerplate.",
-    content: "Be direct, concise, and focused. Do not start replies with filler phrases, pleasantries, or apologies. Deliver the solution immediately with high signal density.",
-    tags: ["persona", "concise", "direct"]
-  },
-  {
-    id: "strict-modern-typescript",
-    title: "Strict Modern TypeScript & Clean Code",
-    author: "TypeScript Standards",
-    category: "coding",
-    description: "Clean, strictly-typed modern code with zero `any` and minimal boilerplate.",
-    content: "Always write strictly-typed modern TypeScript. Never use `any` unless strictly unavoidable; prefer explicit unions, generics, or `unknown` with type guards. Follow single-responsibility principles and minimize unnecessary dependencies.",
-    tags: ["coding", "typescript", "clean-code"]
-  },
-  {
-    id: "owasp-secure-coding",
-    title: "Defensive Coding & OWASP Guidelines",
-    author: "AppSec Guidelines",
-    category: "safety",
-    description: "Prevents injection, validates all input boundaries, and secures credentials.",
-    content: "Always apply defensive coding practices: sanitize and validate all external inputs with strict schemas (e.g. Zod). Use parameterized queries for databases. Never hardcode credentials, secrets, or API keys in code.",
-    tags: ["safety", "security", "owasp"]
-  },
-  {
-    id: "structured-markdown-formatting",
-    title: "Structured Markdown & Data Tables",
-    author: "Design Systems",
-    category: "writing",
-    description: "Formats complex responses with clean headers, bullet points, and comparison tables.",
-    content: "Format complex or multi-faceted replies using GitHub-flavored markdown. Use clear section headers (`##`, `###`), concise bullet lists, and tables when comparing options, specifications, or benchmarks.",
-    tags: ["writing", "markdown", "tables"]
-  },
-  {
-    id: "proactive-memory-habits",
-    title: "Proactive Preference & Memory Tracking",
-    author: "Agentic Memory",
-    category: "memory",
-    description: "Remembers firm preferences and active project goals without having to be asked.",
-    content: "Pay attention to user workflow preferences, favorite tools, and coding style habits. Whenever a firm preference or ongoing project goal is stated, remember it or incorporate it into future recommendations.",
-    tags: ["memory", "preferences", "context"]
-  },
-  {
-    id: "socratic-problem-solving",
-    title: "Socratic First-Principles Discovery",
-    author: "System Thinking",
-    category: "general",
-    description: "Asks clarifying questions to expose assumptions and uncover root causes.",
-    content: "When analyzing complex design decisions or ambiguous requirements, briefly articulate key tradeoffs and ask 1-2 targeted questions to clarify the user's primary constraints before proposing deep solutions.",
-    tags: ["general", "socratic", "discovery"]
-  }
-];
-var marketplaceRoutes = new Hono3();
-marketplaceRoutes.get("/marketplace/mcp", (c) => {
-  return c.json({ servers: MARKETPLACE_MCPS });
-});
-marketplaceRoutes.get("/marketplace/skills", (c) => {
-  return c.json({ skills: MARKETPLACE_SKILLS });
-});
-marketplaceRoutes.get("/marketplace/rules", (c) => {
-  return c.json({ rules: MARKETPLACE_RULES });
-});
-marketplaceRoutes.post("/marketplace/install/mcp", async (c) => {
-  const { id: id2, auth_token, url_override } = await body(
-    c,
-    external_exports.object({
-      id: external_exports.string().min(1),
-      auth_token: external_exports.string().nullable().optional(),
-      url_override: external_exports.string().url().optional()
-    })
-  );
-  const template = MARKETPLACE_MCPS.find((m) => m.id === id2);
-  if (!template) return c.json({ error: "Marketplace item not found" }, 404);
-  const server = c.env.agent.services.mcp.create({
-    name: template.name,
-    url: url_override || template.default_url,
-    auth_token: auth_token ?? null,
-    enabled: true,
-    is_memory_provider: template.category === "memory",
-    memory_mode: template.category === "memory" ? "optimized" : "all_tools"
-  });
-  return c.json({ installed: true, server }, 201);
-});
-marketplaceRoutes.post("/marketplace/install/skill", async (c) => {
-  const { id: id2 } = await body(c, external_exports.object({ id: external_exports.string().min(1) }));
-  const template = MARKETPLACE_SKILLS.find((s2) => s2.id === id2);
-  if (!template) return c.json({ error: "Marketplace item not found" }, 404);
-  const skill = c.env.agent.services.skills.create({
-    name: template.name,
-    description: template.description,
-    instructions: template.instructions,
-    tools_json: template.tools_json,
-    category: template.category,
-    enabled: true
-  });
-  return c.json({ installed: true, skill }, 201);
-});
-marketplaceRoutes.post("/marketplace/install/rule", async (c) => {
-  const { id: id2 } = await body(c, external_exports.object({ id: external_exports.string().min(1) }));
-  const template = MARKETPLACE_RULES.find((r2) => r2.id === id2);
-  if (!template) return c.json({ error: "Marketplace item not found" }, 404);
-  const rule = c.env.agent.services.rules.create({
-    title: template.title,
-    content: template.content,
-    category: template.category,
-    enabled: true
-  });
-  return c.json({ installed: true, rule }, 201);
-});
-
-// src/api/routes/oauth.ts
-var oauthRoutes = new Hono3();
-var GOOGLE_SCOPES = [
-  "https://www.googleapis.com/auth/generative-language",
-  "https://www.googleapis.com/auth/cloud-platform",
-  "https://www.googleapis.com/auth/userinfo.email"
-].join(" ");
-oauthRoutes.get("/oauth/status", async (c) => {
-  const s2 = c.env.agent.services;
-  const current = s2.settings.get();
-  const keys = { ...current.externalKeys };
-  if (keys.googleClientId?.includes("test-client-id")) {
-    delete keys.googleClientId;
-    delete keys.googleClientSecret;
-    s2.settings.update({ externalKeys: keys });
-  }
-  const validGoogleClientId = keys.googleClientId && !keys.googleClientId.includes("test-client-id");
-  return c.json({
-    google: {
-      connected: Boolean(keys.googleOAuthToken),
-      email: keys.googleUserEmail ?? null,
-      hasRefreshToken: Boolean(keys.googleRefreshToken),
-      tokenExpiry: keys.googleTokenExpiry ?? null,
-      hasClientConfig: Boolean(validGoogleClientId && keys.googleClientSecret),
-      clientId: validGoogleClientId ? `${keys.googleClientId.slice(0, 16)}...` : null
-    },
-    claude: {
-      connected: Boolean(keys.anthropicOAuthToken),
-      hasRefreshToken: Boolean(keys.anthropicOAuthRefreshToken),
-      hasClientConfig: Boolean(keys.anthropicClientId && keys.anthropicClientSecret)
-    }
-  });
-});
-oauthRoutes.post("/oauth/google/auth-url", async (c) => {
-  const { redirect_uri, client_id, client_secret } = await body(
-    c,
-    external_exports.object({
-      redirect_uri: external_exports.string().url(),
-      client_id: external_exports.string().min(1).optional(),
-      client_secret: external_exports.string().min(1).optional()
-    })
-  );
-  const s2 = c.env.agent.services;
-  const current = s2.settings.get();
-  const keys = { ...current.externalKeys };
-  if (keys.googleClientId?.includes("test-client-id")) {
-    delete keys.googleClientId;
-    delete keys.googleClientSecret;
-  }
-  const effectiveClientId = client_id && !client_id.includes("test-client-id") ? client_id.trim() : keys.googleClientId && !keys.googleClientId.includes("test-client-id") ? keys.googleClientId : void 0;
-  if (!effectiveClientId) {
-    return c.json(
-      { error: "Google OAuth Client ID is required. Please paste your Client ID from Google Cloud Console." },
-      400
-    );
-  }
-  if (client_id || client_secret) {
-    if (client_id && !client_id.includes("test-client-id")) keys.googleClientId = client_id.trim();
-    if (client_secret) keys.googleClientSecret = client_secret.trim();
-    s2.settings.update({ externalKeys: keys });
-  }
-  const state = Math.random().toString(36).substring(2, 15);
-  const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
-  authUrl.searchParams.set("client_id", effectiveClientId);
-  authUrl.searchParams.set("redirect_uri", redirect_uri);
-  authUrl.searchParams.set("response_type", "code");
-  authUrl.searchParams.set("scope", GOOGLE_SCOPES);
-  authUrl.searchParams.set("access_type", "offline");
-  authUrl.searchParams.set("prompt", "consent");
-  authUrl.searchParams.set("state", state);
-  return c.json({
-    url: authUrl.toString(),
-    state,
-    client_id: effectiveClientId
-  });
-});
-oauthRoutes.post("/oauth/google/exchange", async (c) => {
-  const { code, redirect_uri, client_id, client_secret } = await body(
-    c,
-    external_exports.object({
-      code: external_exports.string().min(1),
-      redirect_uri: external_exports.string().url(),
-      client_id: external_exports.string().optional(),
-      client_secret: external_exports.string().optional()
-    })
-  );
-  const s2 = c.env.agent.services;
-  const current = s2.settings.get();
-  const keys = { ...current.externalKeys };
-  const effectiveClientId = client_id || keys.googleClientId;
-  const effectiveClientSecret = client_secret || keys.googleClientSecret;
-  if (!effectiveClientId || !effectiveClientSecret) {
-    return c.json(
-      { error: "Google Client ID and Client Secret are required to exchange authorization code." },
-      400
-    );
-  }
-  try {
-    const tokenParams = new URLSearchParams({
-      code,
-      client_id: effectiveClientId,
-      client_secret: effectiveClientSecret,
-      redirect_uri,
-      grant_type: "authorization_code"
-    });
-    const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: tokenParams.toString()
-    });
-    const tokenData = await tokenRes.json();
-    if (!tokenRes.ok || !tokenData.access_token) {
-      return c.json(
-        { error: tokenData.error_description || tokenData.error || "Failed to exchange code with Google" },
-        400
-      );
-    }
-    let email3 = null;
-    try {
-      const userRes = await fetch("https://www.googleapis.com/oauth2/v1/userinfo", {
-        headers: { Authorization: `Bearer ${tokenData.access_token}` }
-      });
-      if (userRes.ok) {
-        const userData = await userRes.json();
-        email3 = userData.email || null;
-      }
-    } catch {
-    }
-    keys.googleOAuthToken = tokenData.access_token;
-    if (tokenData.refresh_token) {
-      keys.googleRefreshToken = tokenData.refresh_token;
-    }
-    keys.googleClientId = effectiveClientId;
-    keys.googleClientSecret = effectiveClientSecret;
-    if (tokenData.expires_in) {
-      keys.googleTokenExpiry = Date.now() + tokenData.expires_in * 1e3;
-    }
-    if (email3) {
-      keys.googleUserEmail = email3;
-    }
-    const updated = s2.settings.update({ externalKeys: keys });
-    s2.activity.record("settings.oauth", `Google/Antigravity OAuth connected for ${email3 || "user"}`);
-    return c.json({
-      success: true,
-      provider: "gemini",
-      connected: true,
-      email: email3,
-      expires_in: tokenData.expires_in,
-      settings: updated
-    });
-  } catch (err) {
-    return c.json({ error: err instanceof Error ? err.message : "Exchange network error" }, 500);
-  }
-});
-oauthRoutes.post("/oauth/google/validate-token", async (c) => {
-  const { token, save } = await body(
-    c,
-    external_exports.object({
-      token: external_exports.string().min(1),
-      save: external_exports.boolean().optional()
-    })
-  );
-  const clean = token.trim().replace(/^Bearer\s+/i, "");
-  try {
-    const res = await fetch(`https://www.googleapis.com/oauth2/v1/tokeninfo?access_token=${encodeURIComponent(clean)}`);
-    const data = await res.json();
-    if (!res.ok || data.error) {
-      return c.json({
-        valid: false,
-        error: data.error_description || data.error || "Invalid or expired token"
-      });
-    }
-    if (save) {
-      const s2 = c.env.agent.services;
-      const current = s2.settings.get();
-      const keys = { ...current.externalKeys };
-      keys.googleOAuthToken = clean;
-      if (data.email) keys.googleUserEmail = data.email;
-      if (data.expires_in) keys.googleTokenExpiry = Date.now() + data.expires_in * 1e3;
-      s2.settings.update({ externalKeys: keys });
-      s2.activity.record("settings.oauth", `Saved Google OAuth token for ${data.email || "user"}`);
-    }
-    return c.json({
-      valid: true,
-      email: data.email || null,
-      scope: data.scope || null,
-      expires_in: data.expires_in || null
-    });
-  } catch (err) {
-    return c.json({ valid: false, error: err instanceof Error ? err.message : "Token validation request failed" });
-  }
-});
-oauthRoutes.post("/oauth/claude/auth-url", async (c) => {
-  const { redirect_uri, client_id, client_secret } = await body(
-    c,
-    external_exports.object({
-      redirect_uri: external_exports.string().url(),
-      client_id: external_exports.string().min(1).optional(),
-      client_secret: external_exports.string().min(1).optional()
-    })
-  );
-  const s2 = c.env.agent.services;
-  const current = s2.settings.get();
-  const keys = { ...current.externalKeys };
-  const effectiveClientId = client_id || keys.anthropicClientId;
-  if (!effectiveClientId) {
-    return c.json(
-      { error: "Anthropic Claude Client ID is required to initiate OAuth flow." },
-      400
-    );
-  }
-  if (client_id || client_secret) {
-    if (client_id) keys.anthropicClientId = client_id.trim();
-    if (client_secret) keys.anthropicClientSecret = client_secret.trim();
-    s2.settings.update({ externalKeys: keys });
-  }
-  const state = Math.random().toString(36).substring(2, 15);
-  const authUrl = new URL("https://console.anthropic.com/oauth/authorize");
-  authUrl.searchParams.set("client_id", effectiveClientId);
-  authUrl.searchParams.set("redirect_uri", redirect_uri);
-  authUrl.searchParams.set("response_type", "code");
-  authUrl.searchParams.set("scope", "messages:write");
-  authUrl.searchParams.set("state", state);
-  return c.json({
-    url: authUrl.toString(),
-    state,
-    client_id: effectiveClientId
-  });
-});
-oauthRoutes.post("/oauth/claude/exchange", async (c) => {
-  const { code, redirect_uri, client_id, client_secret } = await body(
-    c,
-    external_exports.object({
-      code: external_exports.string().min(1),
-      redirect_uri: external_exports.string().url(),
-      client_id: external_exports.string().optional(),
-      client_secret: external_exports.string().optional()
-    })
-  );
-  const s2 = c.env.agent.services;
-  const current = s2.settings.get();
-  const keys = { ...current.externalKeys };
-  const effectiveClientId = client_id || keys.anthropicClientId;
-  const effectiveClientSecret = client_secret || keys.anthropicClientSecret;
-  if (!effectiveClientId || !effectiveClientSecret) {
-    return c.json(
-      { error: "Claude Client ID and Client Secret are required to exchange authorization code." },
-      400
-    );
-  }
-  try {
-    const tokenRes = await fetch("https://api.anthropic.com/v1/oauth/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        code,
-        client_id: effectiveClientId,
-        client_secret: effectiveClientSecret,
-        redirect_uri,
-        grant_type: "authorization_code"
-      }).toString()
-    });
-    const tokenData = await tokenRes.json();
-    if (!tokenRes.ok || !tokenData.access_token) {
-      return c.json(
-        { error: tokenData.error_description || tokenData.error || "Failed to exchange code with Anthropic" },
-        400
-      );
-    }
-    keys.anthropicOAuthToken = tokenData.access_token;
-    if (tokenData.refresh_token) keys.anthropicOAuthRefreshToken = tokenData.refresh_token;
-    keys.anthropicClientId = effectiveClientId;
-    keys.anthropicClientSecret = effectiveClientSecret;
-    const updated = s2.settings.update({ externalKeys: keys });
-    s2.activity.record("settings.oauth", "Claude OAuth connected");
-    return c.json({
-      success: true,
-      provider: "anthropic",
-      connected: true,
-      settings: updated
-    });
-  } catch (err) {
-    return c.json({ error: err instanceof Error ? err.message : "Exchange network error" }, 500);
-  }
-});
-oauthRoutes.post("/oauth/claude/validate-token", async (c) => {
-  const { token, save } = await body(
-    c,
-    external_exports.object({
-      token: external_exports.string().min(1),
-      save: external_exports.boolean().optional()
-    })
-  );
-  const clean = token.trim().replace(/^Bearer\s+/i, "");
-  try {
-    const res = await fetch("https://api.anthropic.com/v1/models", {
-      headers: {
-        Authorization: `Bearer ${clean}`,
-        "anthropic-version": "2023-06-01",
-        "anthropic-client": "claude-code",
-        "User-Agent": "claude-code/0.2.29"
-      }
-    });
-    const data = await res.json().catch(() => ({}));
-    if (res.status === 401 || res.status === 403 || data.error?.type === "authentication_error") {
-      return c.json({
-        valid: false,
-        error: data.error?.message || "Authentication failed. Token is invalid, expired, or unauthorized."
-      });
-    }
-    if (save) {
-      const s2 = c.env.agent.services;
-      const current = s2.settings.get();
-      const keys = { ...current.externalKeys };
-      keys.anthropicOAuthToken = clean;
-      s2.settings.update({ externalKeys: keys });
-      s2.activity.record("settings.oauth", "Saved Claude OAuth token");
-    }
-    return c.json({ valid: true, status: res.status });
-  } catch (err) {
-    return c.json({ valid: false, error: err instanceof Error ? err.message : "Validation ping failed" });
-  }
-});
-oauthRoutes.post("/oauth/token", async (c) => {
-  const { provider, token, refresh_token } = await body(
-    c,
-    external_exports.object({
-      provider: external_exports.enum(["anthropic", "gemini"]),
-      token: external_exports.string().min(1).max(4096),
-      refresh_token: external_exports.string().max(4096).optional()
-    })
-  );
-  const s2 = c.env.agent.services;
-  const current = s2.settings.get();
-  const externalKeys = { ...current.externalKeys };
-  if (provider === "anthropic") {
-    externalKeys.anthropicOAuthToken = token.trim();
-  } else if (provider === "gemini") {
-    externalKeys.googleOAuthToken = token.trim();
-    if (refresh_token) externalKeys.googleRefreshToken = refresh_token.trim();
-  }
-  const updated = s2.settings.update({ externalKeys });
-  s2.activity.record("settings.oauth", `Updated ${provider} OAuth credentials`);
-  return c.json({
-    success: true,
-    provider,
-    connected: true,
-    settings: updated
-  });
-});
-oauthRoutes.post("/oauth/disconnect", async (c) => {
-  const { provider } = await body(c, external_exports.object({ provider: external_exports.enum(["anthropic", "gemini"]) }));
-  const s2 = c.env.agent.services;
-  const current = s2.settings.get();
-  const externalKeys = { ...current.externalKeys };
-  if (provider === "anthropic") {
-    delete externalKeys.anthropicOAuthToken;
-    delete externalKeys.anthropicOAuthRefreshToken;
-    delete externalKeys.anthropicClientId;
-    delete externalKeys.anthropicClientSecret;
-  } else if (provider === "gemini") {
-    delete externalKeys.googleOAuthToken;
-    delete externalKeys.googleRefreshToken;
-    delete externalKeys.googleClientId;
-    delete externalKeys.googleClientSecret;
-    delete externalKeys.googleTokenExpiry;
-    delete externalKeys.googleUserEmail;
-  }
-  const updated = s2.settings.update({ externalKeys });
-  s2.activity.record("settings.oauth", `Disconnected ${provider} OAuth`);
-  return c.json({ success: true, provider, connected: false, settings: updated });
-});
-
-// src/api/app.ts
-function createApi() {
-  const app = new Hono3().basePath("/api");
-  app.onError((err) => errorResponse(err));
-  app.notFound(() => errorResponse(new NotFoundError("Unknown API route")));
-  app.use("*", securityHeaders);
-  app.use("*", remoteAuth);
-  app.use("*", csrfProtection);
-  app.use("*", requireSession);
-  app.route("/", semanticRoutes);
-  app.route("/", systemRoutes);
-  app.route("/auth", authRoutes);
-  app.route("/", chatRoutes);
-  app.route("/", dataRoutes);
-  app.route("/", automationRoutes);
-  app.route("/", pushRoutes);
-  app.route("/", remoteRoutes);
-  app.route("/mcp", mcpRoutes);
-  app.route("/", rulesRoutes);
-  app.route("/", skillsRoutes);
-  app.route("/", modelsRoutes);
-  app.route("/", marketplaceRoutes);
-  app.route("/", oauthRoutes);
-  return app;
-}
-__name(createApi, "createApi");
 
 // ../../node_modules/@ai-sdk/provider/dist/index.js
 var marker$16 = "vercel.ai.error";
@@ -93140,118 +92122,6 @@ var CloudflareWorkersAIProvider = class {
     if (failure2) throw classifyAiError(failure2);
   }
 };
-
-// src/ai/mock.ts
-var MockAIProvider = class {
-  constructor(chunkDelayMs = 25) {
-    this.chunkDelayMs = chunkDelayMs;
-  }
-  chunkDelayMs;
-  static {
-    __name(this, "MockAIProvider");
-  }
-  id = "mock";
-  model = "mock";
-  billable = false;
-  async generate(req) {
-    const last = req.messages.at(-1)?.content ?? "";
-    const text2 = `Summary: ${last.slice(0, 200)}`;
-    return { text: text2, usage: estimatedUsage(this, req.system.length + JSON.stringify(req.messages).length, text2.length) };
-  }
-  async *stream(req) {
-    yield* this.generateWithTools({ ...req, tools: [], maxIterations: 1, toolBudgetExhausted: /* @__PURE__ */ __name(() => true, "toolBudgetExhausted") });
-  }
-  async *generateWithTools(req) {
-    const input2 = req.messages.at(-1)?.content.trim() ?? "";
-    const plan = planTools(input2);
-    let reply = "";
-    let calls = 0;
-    for (const step of plan) {
-      const tool5 = req.tools.find((t2) => t2.name === step.name);
-      if (!tool5) continue;
-      if (calls >= req.maxIterations * 4 || req.toolBudgetExhausted()) break;
-      calls++;
-      const id2 = `mock_${calls}`;
-      yield { type: "tool-start", id: id2, name: tool5.name, input: step.input };
-      try {
-        const output2 = await tool5.execute(step.input, id2);
-        yield { type: "tool-end", id: id2, name: tool5.name, output: output2 };
-        reply += step.describe(output2);
-      } catch (error62) {
-        const message = error62 instanceof Error ? error62.message : String(error62);
-        yield { type: "tool-end", id: id2, name: tool5.name, output: null, error: message };
-        reply += `I couldn't complete that: ${message}`;
-      }
-    }
-    if (!reply) {
-      reply = `(Demo mode) You said: "${input2.slice(0, 500)}". Connect Workers AI for real answers \u2014 tasks, notes, memories and reminders work either way.`;
-    }
-    let outputChars = 0;
-    for (const chunk of reply.match(/\S+\s*/g) ?? [reply]) {
-      if (req.signal?.aborted) break;
-      outputChars += chunk.length;
-      yield { type: "text", delta: chunk };
-      await new Promise((r2) => setTimeout(r2, this.chunkDelayMs));
-    }
-    yield {
-      type: "usage",
-      usage: estimatedUsage(this, req.system.length + JSON.stringify(req.messages).length, outputChars)
-    };
-  }
-};
-function planTools(text2) {
-  let m;
-  if (m = text2.match(/^remember(?: that)?\s+(.+)$/i)) {
-    return [{ name: "remember", input: { content: m[1], category: "preference" }, describe: /* @__PURE__ */ __name(() => `Got it \u2014 I'll remember that ${m[1]}.`, "describe") }];
-  }
-  if (m = text2.match(/^(?:add|create) (?:a )?task(?: to)?\s*:?\s+(.+)$/i)) {
-    return [{ name: "create_task", input: { title: m[1] }, describe: /* @__PURE__ */ __name(() => `Added the task "${m[1]}".`, "describe") }];
-  }
-  if (m = text2.match(/^(?:add|create|write) (?:a )?note\s*:?\s+(.+)$/i)) {
-    return [{ name: "create_note", input: { title: m[1].slice(0, 80), content: m[1] }, describe: /* @__PURE__ */ __name(() => `Saved a note.`, "describe") }];
-  }
-  if (m = text2.match(/^(?:complete|finish|mark) (?:the )?task\s+(.+?)(?: as (?:done|completed))?$/i)) {
-    return [{ name: "complete_task", input: { task: m[1] }, describe: /* @__PURE__ */ __name(() => `Marked "${m[1]}" as done.`, "describe") }];
-  }
-  if (m = text2.match(/^(?:delete|remove) (?:the )?task\s+(.+)$/i)) {
-    return [{ name: "delete_task", input: { task: m[1] }, describe: /* @__PURE__ */ __name(() => `I've asked to delete "${m[1]}". Approve it above if you want it gone.`, "describe") }];
-  }
-  if (m = text2.match(/^rewrite note (\S+) as:\s*(.+)$/i)) {
-    return [{ name: "replace_note_content", input: { id: m[1], content: m[2] }, describe: /* @__PURE__ */ __name(() => "I've proposed new text for that note. Approve it above to save it.", "describe") }];
-  }
-  if (/^(?:list|show)(?: my)? tasks|what should i work on/i.test(text2)) {
-    return [
-      {
-        name: "list_tasks",
-        input: { view: "open" },
-        describe: /* @__PURE__ */ __name((out) => {
-          const tasks = (out?.tasks ?? []).map((t2) => `- ${t2.title}`);
-          return tasks.length ? `Here are your open tasks:
-
-${tasks.join("\n")}` : "You have no open tasks.";
-        }, "describe")
-      }
-    ];
-  }
-  if (m = text2.match(/^remind me in (\d+) minutes? to (.+)$/i)) {
-    return [
-      {
-        name: "create_reminder",
-        input: { message: m[2], in_minutes: Number(m[1]) },
-        describe: /* @__PURE__ */ __name(() => `I'll remind you in ${m[1]} minutes to ${m[2]}.`, "describe")
-      }
-    ];
-  }
-  if (m = text2.match(/^(?:search|find)\s+(.+)$/i)) {
-    return [{ name: "search", input: { query: m[1] }, describe: /* @__PURE__ */ __name((out) => `Search results:
-
-\`\`\`json
-${JSON.stringify(out, null, 2).slice(0, 1500)}
-\`\`\``, "describe") }];
-  }
-  return [];
-}
-__name(planTools, "planTools");
 
 // ../../node_modules/@ai-sdk/anthropic/node_modules/@ai-sdk/provider/dist/index.js
 var marker$163 = "vercel.ai.error";
@@ -131567,6 +130437,7 @@ var ExternalAIProvider = class {
       case "anthropic": {
         const clean = this.apiKey.replace(/^Bearer\s+/i, "");
         const anthropic2 = createAnthropic({
+          ...this.options?.endpoint ? { baseURL: this.options.endpoint } : {},
           ...this.isOAuth ? {
             authToken: clean,
             headers: {
@@ -131575,18 +130446,27 @@ var ExternalAIProvider = class {
               "User-Agent": "claude-code/0.2.29"
             }
           } : {
-            apiKey: this.apiKey
+            apiKey: clean
           }
         });
-        return anthropic2(this.model);
+        let effectiveModel = this.model;
+        if (effectiveModel.includes("claude-3-5-sonnet")) {
+          effectiveModel = "claude-sonnet-4-5-20250929";
+        } else if (effectiveModel.includes("claude-3-5-haiku")) {
+          effectiveModel = "claude-haiku-4-5-20251001";
+        }
+        return anthropic2(effectiveModel);
       }
       case "openai": {
-        const openai2 = createOpenAI({ apiKey: this.apiKey });
+        const openai2 = createOpenAI({
+          apiKey: this.apiKey,
+          ...this.options?.endpoint ? { baseURL: this.options.endpoint } : {}
+        });
         return openai2(this.model);
       }
       case "openrouter": {
         const openrouter = createOpenAI({
-          baseURL: "https://openrouter.ai/api/v1",
+          baseURL: this.options?.endpoint || "https://openrouter.ai/api/v1",
           apiKey: this.apiKey,
           headers: {
             "HTTP-Referer": "https://talorys.pages.dev",
@@ -131597,21 +130477,49 @@ var ExternalAIProvider = class {
       }
       case "gemini": {
         const clean = this.apiKey.replace(/^Bearer\s+/i, "");
+        let effectiveModel = this.model;
+        if (effectiveModel === "gemini-2.5-pro" || effectiveModel.startsWith("gemini-3.")) {
+          effectiveModel = "gemini-2.0-flash";
+        }
         const google2 = createGoogle({
-          apiKey: this.isOAuth ? "placeholder" : this.apiKey,
+          ...this.options?.endpoint ? { baseURL: this.options.endpoint } : {},
+          apiKey: this.isOAuth ? "" : clean,
           headers: this.isOAuth ? {
             Authorization: `Bearer ${clean}`
+          } : void 0,
+          fetch: this.isOAuth ? (url2, init) => {
+            const headers = new Headers(init?.headers);
+            headers.delete("x-goog-api-key");
+            return fetch(url2, { ...init, headers });
           } : void 0
         });
-        return google2(this.model);
+        return google2(effectiveModel);
       }
       case "freellmapi": {
-        const baseURL = this.options?.endpoint || "http://localhost:3001/v1";
+        let baseURL = this.options?.endpoint?.trim();
+        if (baseURL?.startsWith("ttp://")) baseURL = "http://" + baseURL.slice(6);
+        if (baseURL?.startsWith("ttps://")) baseURL = "https://" + baseURL.slice(7);
+        const isUnreachable = !baseURL || baseURL.includes("localhost") || baseURL.includes("127.0.0.1") || !baseURL.startsWith("http");
+        if (isUnreachable) {
+          baseURL = "https://text.pollinations.ai/openai";
+        }
+        let targetModel = this.model;
+        if (!targetModel || targetModel.startsWith("freellmapi/") || targetModel === "auto") {
+          targetModel = "openai";
+        }
         const freellmapi = createOpenAI({
           baseURL,
-          apiKey: this.apiKey || "freellmapi-local"
+          apiKey: this.apiKey || "anonymous"
         });
-        return freellmapi(this.model);
+        return freellmapi(targetModel);
+      }
+      case "pollinations": {
+        const pollinations = createOpenAI({
+          baseURL: "https://text.pollinations.ai/openai",
+          apiKey: "anonymous"
+        });
+        const targetModel = !this.model || this.model === "auto" ? "openai" : this.model;
+        return pollinations(targetModel);
       }
       case "groq": {
         const groq = createOpenAI({
@@ -131645,7 +130553,8 @@ var ExternalAIProvider = class {
               "User-Agent": "Talorys-AI/0.1.7"
             }
           });
-          return provider(this.model);
+          const targetModel = this.model === "auto" || !this.model ? catalogEntry?.defaultModel || "auto" : this.model;
+          return provider(targetModel);
         }
         throw new Error(`Unsupported external AI provider: "${this.id}". Configure an endpoint in Settings -> AI.`);
       }
@@ -131771,7 +130680,8 @@ function createAIProvider(env, settings, override) {
   const model = override?.model || settings.model || catalogEntry?.defaultModel || "auto";
   if (providerId === "workers-ai") {
     if (!env.AI) return null;
-    return new CloudflareWorkersAIProvider(env.AI, model);
+    const finalModel = !model || model === "auto" ? "@cf/zai-org/glm-4.7-flash" : model;
+    return new CloudflareWorkersAIProvider(env.AI, finalModel);
   }
   let credential = void 0;
   let isOAuth = false;
@@ -131781,22 +130691,48 @@ function createAIProvider(env, settings, override) {
     options = { endpoint: customEndpoint };
   }
   if (providerId === "anthropic") {
-    if (settings.externalKeys?.anthropicOAuthToken) {
+    const authMode = settings.externalKeys?.anthropicAuthMode;
+    if (authMode === "apikey" && settings.externalKeys?.anthropic) {
+      credential = settings.externalKeys.anthropic;
+      isOAuth = false;
+    } else if (authMode === "oauth" && settings.externalKeys?.anthropicOAuthToken) {
       credential = settings.externalKeys.anthropicOAuthToken;
       isOAuth = true;
-    } else {
-      credential = settings.externalKeys?.anthropic;
+    } else if (settings.externalKeys?.anthropic) {
+      credential = settings.externalKeys.anthropic;
+      isOAuth = false;
+    } else if (settings.externalKeys?.anthropicOAuthToken) {
+      credential = settings.externalKeys.anthropicOAuthToken;
+      isOAuth = true;
     }
   } else if (providerId === "gemini") {
-    if (settings.externalKeys?.googleOAuthToken) {
+    const authMode = settings.externalKeys?.geminiAuthMode;
+    if (authMode === "apikey" && settings.externalKeys?.gemini) {
+      credential = settings.externalKeys.gemini;
+      isOAuth = false;
+    } else if (authMode === "oauth" && settings.externalKeys?.googleOAuthToken) {
       credential = settings.externalKeys.googleOAuthToken;
       isOAuth = true;
-    } else {
-      credential = settings.externalKeys?.gemini;
+    } else if (settings.externalKeys?.gemini) {
+      credential = settings.externalKeys.gemini;
+      isOAuth = false;
+    } else if (settings.externalKeys?.googleOAuthToken) {
+      credential = settings.externalKeys.googleOAuthToken;
+      isOAuth = true;
     }
   } else if (providerId === "freellmapi") {
-    credential = settings.externalKeys?.freellmapiKey || "freellmapi-local";
-    options = { endpoint: settings.externalKeys?.freellmapiEndpoint || "http://localhost:3001/v1" };
+    credential = settings.externalKeys?.freellmapiKey || "freellmapi-cloud";
+    let ep = settings.externalKeys?.freellmapiEndpoint?.trim();
+    if (ep?.startsWith("ttp://")) ep = "http://" + ep.slice(6);
+    if (ep?.startsWith("ttps://")) ep = "https://" + ep.slice(7);
+    if (ep && !ep.includes("localhost") && !ep.includes("127.0.0.1") && ep.startsWith("http")) {
+      options = { endpoint: ep };
+    } else {
+      options = { endpoint: "https://text.pollinations.ai/openai" };
+    }
+  } else if (providerId === "pollinations") {
+    credential = "anonymous";
+    options = { endpoint: "https://text.pollinations.ai/openai" };
   } else if (providerId === "groq") {
     credential = settings.externalKeys?.groqKey || settings.externalKeys?.openai;
   } else if (providerId === "cerebras") {
@@ -131825,6 +130761,1309 @@ function createAIProvider(env, settings, override) {
   return new ExternalAIProvider(providerId, model, credential, isOAuth, options);
 }
 __name(createAIProvider, "createAIProvider");
+
+// src/api/routes/models.ts
+var DEFAULT_CLOUDFLARE_MODELS = [
+  {
+    id: "@cf/zai-org/glm-4.7-flash",
+    name: "GLM-4.7 Flash (Original Default)",
+    description: "Original Talorys default model. 131k context, function calling, streaming, hosted natively on Cloudflare Workers AI.",
+    provider: "cloudflare",
+    tags: ["recommended", "original-default", "tool-calling", "fast", "general"],
+    recommended: true
+  },
+  {
+    id: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+    name: "Llama 3.3 70B Instruct (FP8 Fast)",
+    description: "Meta's flagship 70B model optimized for fast inference with tool calling support.",
+    provider: "cloudflare",
+    tags: ["recommended", "tool-calling", "fast", "general"]
+  },
+  {
+    id: "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
+    name: "DeepSeek R1 Distill Qwen 32B",
+    description: "Advanced reasoning model with chain-of-thought capabilities.",
+    provider: "cloudflare",
+    tags: ["reasoning", "coding", "math"]
+  },
+  {
+    id: "@cf/meta/llama-3.1-70b-instruct",
+    name: "Llama 3.1 70B Instruct",
+    description: "High-capability open model with 128k context and function calling.",
+    provider: "cloudflare",
+    tags: ["tool-calling", "general"]
+  },
+  {
+    id: "@cf/meta/llama-3.1-8b-instruct",
+    name: "Llama 3.1 8B Instruct",
+    description: "Fast, efficient 8B model suitable for daily assistance and rapid responses.",
+    provider: "cloudflare",
+    tags: ["fast", "tool-calling"]
+  },
+  {
+    id: "@cf/meta/llama-3.2-3b-instruct",
+    name: "Llama 3.2 3B Instruct",
+    description: "Compact and ultra-low latency model for simple tasks.",
+    provider: "cloudflare",
+    tags: ["fast", "lightweight"]
+  },
+  {
+    id: "@cf/meta/llama-3.2-11b-vision-instruct",
+    name: "Llama 3.2 11B Vision Instruct",
+    description: "Multimodal text and image understanding model.",
+    provider: "cloudflare",
+    tags: ["vision", "multimodal"]
+  },
+  {
+    id: "@cf/qwen/qwen2.5-7b-instruct",
+    name: "Qwen 2.5 7B Instruct",
+    description: "Excellent multilingual and coding capabilities from Alibaba Cloud.",
+    provider: "cloudflare",
+    tags: ["coding", "multilingual"]
+  },
+  {
+    id: "@cf/mistral/mistral-7b-instruct-v0.2",
+    name: "Mistral 7B Instruct v0.2",
+    description: "Balanced general-purpose 7B model.",
+    provider: "cloudflare",
+    tags: ["general"]
+  },
+  {
+    id: "@cf/google/gemma-7b-it",
+    name: "Google Gemma 7B IT",
+    description: "Lightweight open model trained on Google technology.",
+    provider: "cloudflare",
+    tags: ["general"]
+  }
+];
+var PRESET_MODELS = {
+  cloudflare: DEFAULT_CLOUDFLARE_MODELS,
+  anthropic: [
+    {
+      id: "claude-sonnet-4-5-20250929",
+      name: "Claude 3.5 / 3.7 Sonnet",
+      description: "Industry-leading intelligence for coding, analysis, and nuance.",
+      provider: "anthropic",
+      tags: ["recommended", "coding", "analysis", "tool-calling"],
+      recommended: true
+    },
+    {
+      id: "claude-3-7-sonnet-20250219",
+      name: "Claude 3.7 Sonnet (Extended Reasoning)",
+      description: "Hybrid reasoning model capable of standard chat and extended thinking.",
+      provider: "anthropic",
+      tags: ["reasoning", "coding", "tool-calling"]
+    },
+    {
+      id: "claude-haiku-4-5-20251001",
+      name: "Claude 3.5 Haiku",
+      description: "Lightning-fast model with near Sonnet-level speed and responsiveness.",
+      provider: "anthropic",
+      tags: ["fast", "tool-calling"]
+    }
+  ],
+  openai: [
+    {
+      id: "gpt-4o",
+      name: "GPT-4o",
+      description: "OpenAI flagship omni model for multimodal understanding and complex tasks.",
+      provider: "openai",
+      tags: ["recommended", "tool-calling", "general"],
+      recommended: true
+    },
+    {
+      id: "gpt-4o-mini",
+      name: "GPT-4o Mini",
+      description: "Fast, cost-efficient model for lightweight daily tasks.",
+      provider: "openai",
+      tags: ["fast", "tool-calling"]
+    },
+    {
+      id: "o3-mini",
+      name: "o3-mini",
+      description: "High-speed reasoning model specialized in STEM, coding, and math.",
+      provider: "openai",
+      tags: ["reasoning", "coding", "math"]
+    }
+  ],
+  openrouter: [
+    {
+      id: "anthropic/claude-3.7-sonnet",
+      name: "Claude 3.7 Sonnet (via OpenRouter)",
+      description: "Access Anthropic Claude 3.7 Sonnet via OpenRouter gateway.",
+      provider: "openrouter",
+      tags: ["recommended", "reasoning", "coding"],
+      recommended: true
+    },
+    {
+      id: "openai/gpt-4o",
+      name: "GPT-4o (via OpenRouter)",
+      description: "Access OpenAI GPT-4o via OpenRouter gateway.",
+      provider: "openrouter",
+      tags: ["general", "tool-calling"]
+    },
+    {
+      id: "deepseek/deepseek-r1",
+      name: "DeepSeek R1 (via OpenRouter)",
+      description: "Open reasoning model with chain-of-thought capabilities.",
+      provider: "openrouter",
+      tags: ["reasoning", "math", "coding"]
+    },
+    {
+      id: "google/gemini-2.0-flash-001",
+      name: "Gemini 2.0 Flash (via OpenRouter)",
+      description: "Next-gen low-latency multimodal model.",
+      provider: "openrouter",
+      tags: ["fast", "multimodal"]
+    },
+    {
+      id: "meta-llama/llama-3.3-70b-instruct",
+      name: "Llama 3.3 70B (via OpenRouter)",
+      description: "Meta open-weights flagship via high-throughput providers.",
+      provider: "openrouter",
+      tags: ["general"]
+    }
+  ],
+  google: [
+    {
+      id: "gemini-2.0-flash",
+      name: "Gemini 2.0 Flash",
+      description: "Ultra-fast multimodal model with comprehensive tool support.",
+      provider: "google",
+      tags: ["recommended", "fast", "multimodal", "tool-calling"],
+      recommended: true
+    },
+    {
+      id: "gemini-2.0-pro-exp-02-05",
+      name: "Gemini 2.0 Pro Experimental",
+      description: "State-of-the-art model for complex logic, coding, and deep reasoning.",
+      provider: "google",
+      tags: ["reasoning", "coding", "tool-calling"]
+    },
+    {
+      id: "gemini-1.5-pro",
+      name: "Gemini 1.5 Pro",
+      description: "Massive 2M token context window model for deep document analysis.",
+      provider: "google",
+      tags: ["large-context", "analysis"]
+    },
+    {
+      id: "gemini-1.5-flash",
+      name: "Gemini 1.5 Flash",
+      description: "Lightweight, highly capable everyday model.",
+      provider: "google",
+      tags: ["fast", "general"]
+    }
+  ],
+  freellmapi: [
+    {
+      id: "freellmapi/auto",
+      name: "FreeLLMAPI Auto Router (Best Free Model)",
+      description: "Automatically routes requests across 34 free providers and 635 models based on capability and speed.",
+      provider: "freellmapi",
+      tags: ["recommended", "free", "router", "auto-failover"],
+      recommended: true
+    },
+    {
+      id: "freellmapi/fusion",
+      name: "FreeLLMAPI Virtual Fusion (Multi-Model Consensus)",
+      description: "Fans out prompts to multiple free models in parallel and synthesizes a single consensus answer.",
+      provider: "freellmapi",
+      tags: ["free", "fusion", "reasoning"]
+    },
+    {
+      id: "gemini-2.0-flash",
+      name: "Gemini 2.0 Flash (FreeLLMAPI Free Tier)",
+      description: "Google Gemini 2.0 Flash via FreeLLMAPI free pool.",
+      provider: "freellmapi",
+      tags: ["free", "fast", "multimodal"]
+    },
+    {
+      id: "llama-3.3-70b-versatile",
+      name: "Llama 3.3 70B (FreeLLMAPI)",
+      description: "Meta 70B high-reasoning model via FreeLLMAPI free allocation.",
+      provider: "freellmapi",
+      tags: ["free", "general", "tool-calling"]
+    },
+    {
+      id: "deepseek-chat",
+      name: "DeepSeek V3 (FreeLLMAPI)",
+      description: "DeepSeek general and coding model via FreeLLMAPI.",
+      provider: "freellmapi",
+      tags: ["free", "coding"]
+    }
+  ],
+  groq: [
+    {
+      id: "llama-3.3-70b-versatile",
+      name: "Llama 3.3 70B Versatile",
+      description: "Free high-speed 70B model running at ~250 tokens/sec on Groq LPUs.",
+      provider: "groq",
+      tags: ["recommended", "free", "fast", "tool-calling"],
+      recommended: true
+    },
+    {
+      id: "llama-3.1-8b-instant",
+      name: "Llama 3.1 8B Instant",
+      description: "Ultra-low latency 8B model running at ~800 tokens/sec on Groq.",
+      provider: "groq",
+      tags: ["free", "ultra-fast"]
+    },
+    {
+      id: "mixtral-8x7b-32768",
+      name: "Mixtral 8x7B (32k context)",
+      description: "Mistral MoE architecture model with 32k context on Groq free tier.",
+      provider: "groq",
+      tags: ["free", "moe"]
+    }
+  ],
+  cerebras: [
+    {
+      id: "llama-3.3-70b",
+      name: "Llama 3.3 70B",
+      description: "World-record 2,100+ tokens/sec inference speed on Cerebras Wafer-Scale Engine.",
+      provider: "cerebras",
+      tags: ["recommended", "free", "ultra-fast"],
+      recommended: true
+    },
+    {
+      id: "llama-3.1-8b",
+      name: "Llama 3.1 8B",
+      description: "2,800+ tokens/sec instantaneous inference speed on Cerebras free tier.",
+      provider: "cerebras",
+      tags: ["free", "ultra-fast"]
+    }
+  ],
+  mistral: [
+    {
+      id: "mistral-small-latest",
+      name: "Mistral Small Latest",
+      description: "Mistral's cost-effective general intelligence model on free tier.",
+      provider: "mistral",
+      tags: ["recommended", "free", "general"],
+      recommended: true
+    },
+    {
+      id: "codestral-latest",
+      name: "Codestral 22B",
+      description: "Mistral's specialized coding model for software engineering.",
+      provider: "mistral",
+      tags: ["free", "coding"]
+    }
+  ],
+  pollinations: [
+    {
+      id: "openai",
+      name: "Pollinations OpenAI (Zero Key)",
+      description: "Instant 100% free AI model, requires no API key or account.",
+      provider: "pollinations",
+      tags: ["recommended", "free", "zero-key"],
+      recommended: true
+    },
+    {
+      id: "mistral",
+      name: "Pollinations Mistral (Zero Key)",
+      description: "Fast free Mistral model with zero authentication required.",
+      provider: "pollinations",
+      tags: ["free", "zero-key"]
+    },
+    {
+      id: "deepseek",
+      name: "Pollinations DeepSeek (Zero Key)",
+      description: "DeepSeek reasoning model accessible with zero credentials.",
+      provider: "pollinations",
+      tags: ["free", "reasoning", "zero-key"]
+    }
+  ],
+  nvidia: [
+    {
+      id: "meta/llama-3.3-70b-instruct",
+      name: "NVIDIA NIM Llama 3.3 70B",
+      description: "High-performance inference microservice with free developer credits.",
+      provider: "nvidia",
+      tags: ["recommended", "free", "fast"],
+      recommended: true
+    },
+    {
+      id: "nvidia/llama-3.1-nemotron-70b-instruct",
+      name: "Nemotron 70B Instruct",
+      description: "NVIDIA's customized high-reasoning model optimized for alignment.",
+      provider: "nvidia",
+      tags: ["free", "reasoning"]
+    }
+  ],
+  "github-models": [
+    {
+      id: "gpt-4o",
+      name: "GitHub Models GPT-4o",
+      description: "Free developer playground access to GPT-4o via GitHub Personal Access Token.",
+      provider: "github-models",
+      tags: ["recommended", "free", "multimodal"],
+      recommended: true
+    },
+    {
+      id: "gpt-4o-mini",
+      name: "GitHub Models GPT-4o-mini",
+      description: "Fast and lightweight GPT-4o model via GitHub Models.",
+      provider: "github-models",
+      tags: ["free", "fast"]
+    }
+  ],
+  siliconflow: [
+    {
+      id: "deepseek-ai/DeepSeek-V3",
+      name: "DeepSeek V3 (SiliconFlow)",
+      description: "Free SiliconCloud tier for DeepSeek V3 general intelligence.",
+      provider: "siliconflow",
+      tags: ["recommended", "free", "coding"],
+      recommended: true
+    },
+    {
+      id: "deepseek-ai/DeepSeek-R1",
+      name: "DeepSeek R1 (SiliconFlow)",
+      description: "Full chain-of-thought open reasoning model on SiliconCloud.",
+      provider: "siliconflow",
+      tags: ["free", "reasoning"]
+    }
+  ],
+  zhipu: [
+    {
+      id: "glm-4-flash",
+      name: "GLM-4 Flash (Z.ai)",
+      description: "Completely free ultra-fast Chinese/English bilingual foundation model.",
+      provider: "zhipu",
+      tags: ["recommended", "free", "fast"],
+      recommended: true
+    }
+  ]
+};
+var modelsRoutes = new Hono3();
+modelsRoutes.get("/models/cloudflare", async (c) => {
+  const settings = c.env.agent.services.settings.get();
+  const cfToken = settings.externalKeys?.cloudflareToken;
+  const cfAccount = settings.externalKeys?.cloudflareAccountId;
+  if (cfToken && cfAccount) {
+    try {
+      const res = await fetch(
+        `https://api.cloudflare.com/client/v4/accounts/${cfAccount}/ai/models/search?task=Text%20Generation&per_page=100`,
+        {
+          headers: {
+            Authorization: `Bearer ${cfToken}`,
+            "Content-Type": "application/json"
+          }
+        }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        if (data.result && Array.isArray(data.result) && data.result.length > 0) {
+          const dynamicModels = data.result.map((m) => {
+            const isRec = m.id.includes("llama-3.3-70b-instruct-fp8-fast");
+            const tags = [];
+            if (isRec) tags.push("recommended");
+            if (m.id.includes("fast")) tags.push("fast");
+            if (m.id.includes("r1") || m.id.includes("reasoning")) tags.push("reasoning");
+            if (m.id.includes("vision")) tags.push("vision");
+            if (m.id.includes("llama-3.1") || m.id.includes("llama-3.3")) tags.push("tool-calling");
+            return {
+              id: m.id,
+              name: m.name || m.id,
+              description: m.description,
+              provider: "cloudflare",
+              tags,
+              recommended: isRec
+            };
+          });
+          return c.json({ models: dynamicModels, source: "cloudflare-live" });
+        }
+      }
+    } catch {
+    }
+  }
+  return c.json({ models: DEFAULT_CLOUDFLARE_MODELS, source: "curated" });
+});
+modelsRoutes.get("/models/presets", (c) => {
+  return c.json({ presets: PRESET_MODELS });
+});
+modelsRoutes.get("/models/providers", (c) => {
+  return c.json({ providers: FREE_LLM_PROVIDERS });
+});
+modelsRoutes.post("/models/test", async (c) => {
+  try {
+    const body2 = await c.req.json().catch(() => ({}));
+    const savedSettings = c.env.agent.services.settings.get();
+    const providerId = (body2.provider || savedSettings.provider || "workers-ai").toLowerCase();
+    const catalogEntry = FREE_LLM_PROVIDERS.find((p) => p.id.toLowerCase() === providerId);
+    const targetModel = body2.model || (providerId === "workers-ai" ? "@cf/zai-org/glm-4.7-flash" : catalogEntry?.defaultModel || "auto");
+    const externalKeys = {
+      ...savedSettings.externalKeys ?? {},
+      providerKeys: { ...savedSettings.externalKeys?.providerKeys ?? {} },
+      providerEndpoints: { ...savedSettings.externalKeys?.providerEndpoints ?? {} }
+    };
+    if (body2.apiKey) {
+      if (providerId === "anthropic") {
+        if (body2.anthropicAuthMode === "oauth") {
+          externalKeys.anthropicOAuthToken = body2.apiKey;
+          externalKeys.anthropicAuthMode = "oauth";
+        } else {
+          externalKeys.anthropic = body2.apiKey;
+          externalKeys.anthropicAuthMode = "apikey";
+        }
+      } else if (providerId === "gemini") {
+        if (body2.geminiAuthMode === "oauth") {
+          externalKeys.googleOAuthToken = body2.apiKey;
+          externalKeys.geminiAuthMode = "oauth";
+        } else {
+          externalKeys.gemini = body2.apiKey;
+          externalKeys.geminiAuthMode = "apikey";
+        }
+      } else if (providerId === "groq") {
+        externalKeys.groqKey = body2.apiKey;
+      } else if (providerId === "cerebras") {
+        externalKeys.cerebrasKey = body2.apiKey;
+      } else if (providerId === "mistral") {
+        externalKeys.mistralKey = body2.apiKey;
+      } else if (providerId === "openai") {
+        externalKeys.openai = body2.apiKey;
+      } else if (providerId === "openrouter") {
+        externalKeys.openrouter = body2.apiKey;
+      } else if (providerId === "freellmapi") {
+        externalKeys.freellmapiKey = body2.apiKey;
+      } else {
+        externalKeys.providerKeys[providerId] = body2.apiKey;
+      }
+    }
+    if (body2.endpoint) {
+      if (providerId === "freellmapi") {
+        externalKeys.freellmapiEndpoint = body2.endpoint;
+      } else {
+        externalKeys.providerEndpoints[providerId] = body2.endpoint;
+      }
+    }
+    const transientSettings = {
+      ...savedSettings,
+      provider: providerId,
+      model: targetModel,
+      externalKeys
+    };
+    const ai = createAIProvider(c.env.env, transientSettings, {
+      provider: providerId,
+      model: targetModel
+    });
+    if (!ai) {
+      return c.json({
+        ok: false,
+        provider: providerId,
+        model: targetModel,
+        error: "Cloudflare Workers AI (env.AI) binding is unavailable in this environment."
+      });
+    }
+    const startTime = Date.now();
+    const result = await ai.generate({
+      system: "You are an automated connectivity test agent. Reply with exactly: Connected successfully.",
+      messages: [{ role: "user", content: "Ping test" }],
+      maxOutputTokens: 25,
+      temperature: 0.1
+    });
+    const latencyMs = Date.now() - startTime;
+    return c.json({
+      ok: true,
+      provider: providerId,
+      model: ai.model,
+      latencyMs,
+      response: result.text.trim()
+    });
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    return c.json({
+      ok: false,
+      error: errorMsg
+    });
+  }
+});
+
+// src/api/routes/marketplace.ts
+var MARKETPLACE_MCPS = [
+  {
+    id: "inkstone",
+    name: "Inkstone Knowledge Base",
+    author: "Cloudflare",
+    description: "Serverless long-term memory and knowledge base running on Cloudflare Workers and Vectorize.",
+    category: "memory",
+    default_url: "https://inkstone-cf.r-cash88.workers.dev/mcp",
+    needs_auth: false,
+    tags: ["memory", "knowledge", "cloudflare", "vectorize"],
+    documentation_url: "https://github.com/ddcash/inkstone"
+  },
+  {
+    id: "github",
+    name: "GitHub Official MCP",
+    author: "Model Context Protocol",
+    description: "Search repositories, read code, view issues, inspect pull requests, and commit changes.",
+    category: "developer",
+    default_url: "https://api.githubcopilot.com/mcp",
+    needs_auth: true,
+    auth_hint: "Personal Access Token (classic or fine-grained with repo scope)",
+    tags: ["git", "code", "github", "issues", "pr"],
+    documentation_url: "https://github.com/modelcontextprotocol/servers/tree/main/src/github"
+  },
+  {
+    id: "brave-search",
+    name: "Brave Search",
+    author: "Brave Software",
+    description: "Real-time web search and local business queries via the Brave Search API.",
+    category: "search",
+    default_url: "https://api.search.brave.com/mcp",
+    needs_auth: true,
+    auth_hint: "Brave Search API Key from api.search.brave.com",
+    tags: ["search", "web", "news"],
+    documentation_url: "https://github.com/modelcontextprotocol/servers/tree/main/src/brave-search"
+  },
+  {
+    id: "fetch",
+    name: "Fetch Web Scraper",
+    author: "Model Context Protocol",
+    description: "Converts any public web page into clean markdown for reading and analysis.",
+    category: "search",
+    default_url: "https://fetch.mcp.run",
+    needs_auth: false,
+    tags: ["web", "scrape", "markdown", "reader"],
+    documentation_url: "https://github.com/modelcontextprotocol/servers/tree/main/src/fetch"
+  },
+  {
+    id: "postgres",
+    name: "PostgreSQL Inspector",
+    author: "Model Context Protocol",
+    description: "Read-only database querying, schema introspection, and performance analysis.",
+    category: "database",
+    default_url: "http://localhost:5433/mcp",
+    needs_auth: true,
+    auth_hint: "Postgres connection string or server bearer token",
+    tags: ["sql", "postgres", "database"],
+    documentation_url: "https://github.com/modelcontextprotocol/servers/tree/main/src/postgres"
+  },
+  {
+    id: "memory",
+    name: "Knowledge Graph Memory",
+    author: "Model Context Protocol",
+    description: "Graph-based persistent memory organizing entities, relations, and observations.",
+    category: "memory",
+    default_url: "https://memory.mcp.run",
+    needs_auth: false,
+    tags: ["memory", "graph", "relations"],
+    documentation_url: "https://github.com/modelcontextprotocol/servers/tree/main/src/memory"
+  },
+  {
+    id: "cloudflare-bindings",
+    name: "Cloudflare Developer Platform",
+    author: "Cloudflare",
+    description: "Inspect Workers, KV namespaces, D1 databases, R2 buckets, and Hyperdrive configs.",
+    category: "developer",
+    default_url: "https://api.cloudflare.com/client/v4/mcp",
+    needs_auth: true,
+    auth_hint: "Cloudflare API Token with Workers & Storage read permissions",
+    tags: ["cloudflare", "workers", "d1", "r2", "kv"],
+    documentation_url: "https://developers.cloudflare.com/workers-ai/"
+  },
+  {
+    id: "slack",
+    name: "Slack Workspace Connector",
+    author: "Model Context Protocol",
+    description: "Search Slack workspace history, read public channels, and view user threads.",
+    category: "productivity",
+    default_url: "https://slack.mcp.run",
+    needs_auth: true,
+    auth_hint: "Slack Bot User OAuth Token (xoxb-...)",
+    tags: ["chat", "slack", "team", "collaboration"],
+    documentation_url: "https://github.com/modelcontextprotocol/servers/tree/main/src/slack"
+  }
+];
+var MARKETPLACE_SKILLS = [
+  {
+    id: "appsec-auditor",
+    name: "Application Security & Vulnerability Auditor",
+    author: "Agency Security",
+    category: "coding",
+    description: "Hunts hardcoded secrets, injection sinks, broken access controls, and unsafe dependencies.",
+    instructions: "When reviewing code or investigating systems:\n1. Threat Model: Map trust boundaries and user-controlled inputs.\n2. Vulnerability Hunt: Check for OWASP Top 10, CWE-79 (XSS), CWE-89 (SQLi), CWE-94 (Code Injection).\n3. Row-Level & Secret Checks: Verify no secrets or credentials appear in repo files.\n4. Deliver findings mapped to CWEs with remediation diffs.",
+    tools_json: JSON.stringify(["code_review", "security_scan"]),
+    tags: ["security", "audit", "owasp", "cwe"]
+  },
+  {
+    id: "cloud-architect",
+    name: "Cloud Security & Zero-Trust Architect",
+    author: "Agency Cloud",
+    category: "coding",
+    description: "Designs resilient, least-privilege cloud architectures on Cloudflare, AWS, and GCP.",
+    instructions: "When designing or reviewing cloud architectures:\n1. Apply Zero-Trust principles: verify explicitly, least-privilege access, assume breach.\n2. Infrastructure as Code: prefer declarative configs and immutable deployments.\n3. Data Protection: encrypt in transit and at rest, manage key rotation, isolate databases.",
+    tools_json: JSON.stringify(["cloud_audit"]),
+    tags: ["cloud", "architecture", "zero-trust", "cloudflare"]
+  },
+  {
+    id: "deep-researcher",
+    name: "Deep Intelligence & Knowledge Synthesizer",
+    author: "Research Labs",
+    category: "research",
+    description: "Exhaustively queries internal knowledge bases, memories, notes, and external MCP tools.",
+    instructions: "When researching an inquiry:\n1. Query all connected knowledge sources and memories first.\n2. Cross-reference facts across notes and search tools.\n3. Synthesize structured findings with citations and confidence levels.\n4. Propose durable insights to store in memory.",
+    tools_json: JSON.stringify(["semantic_search", "notes_search", "mcp:*"]),
+    tags: ["research", "synthesis", "memory", "facts"]
+  },
+  {
+    id: "product-manager",
+    name: "Product Strategist & Roadmapper",
+    author: "Product Guild",
+    category: "productivity",
+    description: "Transforms user goals into crisp PRDs, user stories, milestone roadmaps, and acceptance criteria.",
+    instructions: "When helping plan product features:\n1. Define user problem, hypothesis, and expected outcome.\n2. Write user stories with Given/When/Then acceptance criteria.\n3. Prioritize by impact vs effort (MoSCoW or RICE).\n4. Convert action items into tasks with projects and due dates.",
+    tools_json: JSON.stringify(["tasks_create", "projects_create"]),
+    tags: ["product", "strategy", "roadmap", "user-stories"]
+  },
+  {
+    id: "incident-responder",
+    name: "Incident Response & Forensics Specialist",
+    author: "SecOps",
+    category: "coding",
+    description: "Coordinates breach response, identifies IOCs, preserves evidence, and authors post-mortems.",
+    instructions: "When handling an operational or security incident:\n1. Establish timeline: identify first indicator of compromise (IOC).\n2. Containment: isolate affected services or revoked tokens.\n3. Root Cause Analysis: trace how access was gained.\n4. Author clear post-mortem with preventative actions.",
+    tools_json: JSON.stringify(["audit_log"]),
+    tags: ["secops", "incident", "forensics", "postmortem"]
+  },
+  {
+    id: "technical-writer",
+    name: "Technical Documentation Specialist",
+    author: "DocOps",
+    category: "writing",
+    description: "Writes world-class API references, architecture decision records (ADRs), and developer guides.",
+    instructions: "When authoring documentation:\n1. Structure with executive overview, prerequisite diagram, and runnable code samples.\n2. Keep prose active, precise, and unambiguous.\n3. Format tables for options/parameters and callouts for critical warnings.",
+    tools_json: JSON.stringify(["notes_create"]),
+    tags: ["documentation", "writing", "adr", "api"]
+  }
+];
+var MARKETPLACE_RULES = [
+  {
+    id: "concise-high-signal",
+    title: "Concise & High-Signal Persona",
+    author: "Talorys Core",
+    category: "persona",
+    description: "Get straight to the answer with zero pleasantries, preamble, or boilerplate.",
+    content: "Be direct, concise, and focused. Do not start replies with filler phrases, pleasantries, or apologies. Deliver the solution immediately with high signal density.",
+    tags: ["persona", "concise", "direct"]
+  },
+  {
+    id: "strict-modern-typescript",
+    title: "Strict Modern TypeScript & Clean Code",
+    author: "TypeScript Standards",
+    category: "coding",
+    description: "Clean, strictly-typed modern code with zero `any` and minimal boilerplate.",
+    content: "Always write strictly-typed modern TypeScript. Never use `any` unless strictly unavoidable; prefer explicit unions, generics, or `unknown` with type guards. Follow single-responsibility principles and minimize unnecessary dependencies.",
+    tags: ["coding", "typescript", "clean-code"]
+  },
+  {
+    id: "owasp-secure-coding",
+    title: "Defensive Coding & OWASP Guidelines",
+    author: "AppSec Guidelines",
+    category: "safety",
+    description: "Prevents injection, validates all input boundaries, and secures credentials.",
+    content: "Always apply defensive coding practices: sanitize and validate all external inputs with strict schemas (e.g. Zod). Use parameterized queries for databases. Never hardcode credentials, secrets, or API keys in code.",
+    tags: ["safety", "security", "owasp"]
+  },
+  {
+    id: "structured-markdown-formatting",
+    title: "Structured Markdown & Data Tables",
+    author: "Design Systems",
+    category: "writing",
+    description: "Formats complex responses with clean headers, bullet points, and comparison tables.",
+    content: "Format complex or multi-faceted replies using GitHub-flavored markdown. Use clear section headers (`##`, `###`), concise bullet lists, and tables when comparing options, specifications, or benchmarks.",
+    tags: ["writing", "markdown", "tables"]
+  },
+  {
+    id: "proactive-memory-habits",
+    title: "Proactive Preference & Memory Tracking",
+    author: "Agentic Memory",
+    category: "memory",
+    description: "Remembers firm preferences and active project goals without having to be asked.",
+    content: "Pay attention to user workflow preferences, favorite tools, and coding style habits. Whenever a firm preference or ongoing project goal is stated, remember it or incorporate it into future recommendations.",
+    tags: ["memory", "preferences", "context"]
+  },
+  {
+    id: "socratic-problem-solving",
+    title: "Socratic First-Principles Discovery",
+    author: "System Thinking",
+    category: "general",
+    description: "Asks clarifying questions to expose assumptions and uncover root causes.",
+    content: "When analyzing complex design decisions or ambiguous requirements, briefly articulate key tradeoffs and ask 1-2 targeted questions to clarify the user's primary constraints before proposing deep solutions.",
+    tags: ["general", "socratic", "discovery"]
+  }
+];
+var marketplaceRoutes = new Hono3();
+marketplaceRoutes.get("/marketplace/mcp", (c) => {
+  return c.json({ servers: MARKETPLACE_MCPS });
+});
+marketplaceRoutes.get("/marketplace/skills", (c) => {
+  return c.json({ skills: MARKETPLACE_SKILLS });
+});
+marketplaceRoutes.get("/marketplace/rules", (c) => {
+  return c.json({ rules: MARKETPLACE_RULES });
+});
+marketplaceRoutes.post("/marketplace/install/mcp", async (c) => {
+  const { id: id2, auth_token, url_override } = await body(
+    c,
+    external_exports.object({
+      id: external_exports.string().min(1),
+      auth_token: external_exports.string().nullable().optional(),
+      url_override: external_exports.string().url().optional()
+    })
+  );
+  const template = MARKETPLACE_MCPS.find((m) => m.id === id2);
+  if (!template) return c.json({ error: "Marketplace item not found" }, 404);
+  const server = c.env.agent.services.mcp.create({
+    name: template.name,
+    url: url_override || template.default_url,
+    auth_token: auth_token ?? null,
+    enabled: true,
+    is_memory_provider: template.category === "memory",
+    memory_mode: template.category === "memory" ? "optimized" : "all_tools"
+  });
+  return c.json({ installed: true, server }, 201);
+});
+marketplaceRoutes.post("/marketplace/install/skill", async (c) => {
+  const { id: id2 } = await body(c, external_exports.object({ id: external_exports.string().min(1) }));
+  const template = MARKETPLACE_SKILLS.find((s2) => s2.id === id2);
+  if (!template) return c.json({ error: "Marketplace item not found" }, 404);
+  const skill = c.env.agent.services.skills.create({
+    name: template.name,
+    description: template.description,
+    instructions: template.instructions,
+    tools_json: template.tools_json,
+    category: template.category,
+    enabled: true
+  });
+  return c.json({ installed: true, skill }, 201);
+});
+marketplaceRoutes.post("/marketplace/install/rule", async (c) => {
+  const { id: id2 } = await body(c, external_exports.object({ id: external_exports.string().min(1) }));
+  const template = MARKETPLACE_RULES.find((r2) => r2.id === id2);
+  if (!template) return c.json({ error: "Marketplace item not found" }, 404);
+  const rule = c.env.agent.services.rules.create({
+    title: template.title,
+    content: template.content,
+    category: template.category,
+    enabled: true
+  });
+  return c.json({ installed: true, rule }, 201);
+});
+
+// src/api/routes/oauth.ts
+var oauthRoutes = new Hono3();
+var GOOGLE_SCOPES = [
+  "https://www.googleapis.com/auth/generative-language",
+  "https://www.googleapis.com/auth/cloud-platform",
+  "https://www.googleapis.com/auth/userinfo.email"
+].join(" ");
+oauthRoutes.get("/oauth/status", async (c) => {
+  const s2 = c.env.agent.services;
+  const current = s2.settings.get();
+  const keys = { ...current.externalKeys };
+  if (keys.googleClientId?.includes("test-client-id")) {
+    delete keys.googleClientId;
+    delete keys.googleClientSecret;
+    s2.settings.update({ externalKeys: keys });
+  }
+  const validGoogleClientId = keys.googleClientId && !keys.googleClientId.includes("test-client-id");
+  return c.json({
+    google: {
+      connected: Boolean(keys.googleOAuthToken),
+      email: keys.googleUserEmail ?? null,
+      hasRefreshToken: Boolean(keys.googleRefreshToken),
+      tokenExpiry: keys.googleTokenExpiry ?? null,
+      hasClientConfig: Boolean(validGoogleClientId && keys.googleClientSecret),
+      clientId: validGoogleClientId ? `${keys.googleClientId.slice(0, 16)}...` : null
+    },
+    claude: {
+      connected: Boolean(keys.anthropicOAuthToken),
+      hasRefreshToken: Boolean(keys.anthropicOAuthRefreshToken),
+      hasClientConfig: Boolean(keys.anthropicClientId && keys.anthropicClientSecret)
+    }
+  });
+});
+oauthRoutes.post("/oauth/google/auth-url", async (c) => {
+  const { redirect_uri, client_id, client_secret } = await body(
+    c,
+    external_exports.object({
+      redirect_uri: external_exports.string().url(),
+      client_id: external_exports.string().min(1).optional(),
+      client_secret: external_exports.string().min(1).optional()
+    })
+  );
+  const s2 = c.env.agent.services;
+  const current = s2.settings.get();
+  const keys = { ...current.externalKeys };
+  if (keys.googleClientId?.includes("test-client-id")) {
+    delete keys.googleClientId;
+    delete keys.googleClientSecret;
+  }
+  const effectiveClientId = client_id && !client_id.includes("test-client-id") ? client_id.trim() : keys.googleClientId && !keys.googleClientId.includes("test-client-id") ? keys.googleClientId : void 0;
+  if (!effectiveClientId) {
+    return c.json(
+      { error: "Google OAuth Client ID is required. Please paste your Client ID from Google Cloud Console." },
+      400
+    );
+  }
+  if (client_id || client_secret) {
+    if (client_id && !client_id.includes("test-client-id")) keys.googleClientId = client_id.trim();
+    if (client_secret) keys.googleClientSecret = client_secret.trim();
+    s2.settings.update({ externalKeys: keys });
+  }
+  const state = Math.random().toString(36).substring(2, 15);
+  const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+  authUrl.searchParams.set("client_id", effectiveClientId);
+  authUrl.searchParams.set("redirect_uri", redirect_uri);
+  authUrl.searchParams.set("response_type", "code");
+  authUrl.searchParams.set("scope", GOOGLE_SCOPES);
+  authUrl.searchParams.set("access_type", "offline");
+  authUrl.searchParams.set("prompt", "consent");
+  authUrl.searchParams.set("state", state);
+  return c.json({
+    url: authUrl.toString(),
+    state,
+    client_id: effectiveClientId
+  });
+});
+oauthRoutes.post("/oauth/google/exchange", async (c) => {
+  const { code, redirect_uri, client_id, client_secret } = await body(
+    c,
+    external_exports.object({
+      code: external_exports.string().min(1),
+      redirect_uri: external_exports.string().url(),
+      client_id: external_exports.string().optional(),
+      client_secret: external_exports.string().optional()
+    })
+  );
+  const s2 = c.env.agent.services;
+  const current = s2.settings.get();
+  const keys = { ...current.externalKeys };
+  const effectiveClientId = client_id || keys.googleClientId;
+  const effectiveClientSecret = client_secret || keys.googleClientSecret;
+  if (!effectiveClientId || !effectiveClientSecret) {
+    return c.json(
+      { error: "Google Client ID and Client Secret are required to exchange authorization code." },
+      400
+    );
+  }
+  try {
+    const tokenParams = new URLSearchParams({
+      code,
+      client_id: effectiveClientId,
+      client_secret: effectiveClientSecret,
+      redirect_uri,
+      grant_type: "authorization_code"
+    });
+    const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: tokenParams.toString()
+    });
+    const tokenData = await tokenRes.json();
+    if (!tokenRes.ok || !tokenData.access_token) {
+      return c.json(
+        { error: tokenData.error_description || tokenData.error || "Failed to exchange code with Google" },
+        400
+      );
+    }
+    let email3 = null;
+    try {
+      const userRes = await fetch("https://www.googleapis.com/oauth2/v1/userinfo", {
+        headers: { Authorization: `Bearer ${tokenData.access_token}` }
+      });
+      if (userRes.ok) {
+        const userData = await userRes.json();
+        email3 = userData.email || null;
+      }
+    } catch {
+    }
+    keys.googleOAuthToken = tokenData.access_token;
+    if (tokenData.refresh_token) {
+      keys.googleRefreshToken = tokenData.refresh_token;
+    }
+    keys.googleClientId = effectiveClientId;
+    keys.googleClientSecret = effectiveClientSecret;
+    if (tokenData.expires_in) {
+      keys.googleTokenExpiry = Date.now() + tokenData.expires_in * 1e3;
+    }
+    if (email3) {
+      keys.googleUserEmail = email3;
+    }
+    const updated = s2.settings.update({ externalKeys: keys });
+    s2.activity.record("settings.oauth", `Google/Antigravity OAuth connected for ${email3 || "user"}`);
+    return c.json({
+      success: true,
+      provider: "gemini",
+      connected: true,
+      email: email3,
+      expires_in: tokenData.expires_in,
+      settings: updated
+    });
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : "Exchange network error" }, 500);
+  }
+});
+oauthRoutes.post("/oauth/google/validate-token", async (c) => {
+  const { token, save } = await body(
+    c,
+    external_exports.object({
+      token: external_exports.string().min(1),
+      save: external_exports.boolean().optional()
+    })
+  );
+  const clean = token.trim().replace(/^Bearer\s+/i, "");
+  try {
+    const res = await fetch(`https://www.googleapis.com/oauth2/v1/tokeninfo?access_token=${encodeURIComponent(clean)}`);
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      return c.json({
+        valid: false,
+        error: data.error_description || data.error || "Invalid or expired token"
+      });
+    }
+    if (save) {
+      const s2 = c.env.agent.services;
+      const current = s2.settings.get();
+      const keys = { ...current.externalKeys };
+      keys.googleOAuthToken = clean;
+      if (data.email) keys.googleUserEmail = data.email;
+      if (data.expires_in) keys.googleTokenExpiry = Date.now() + data.expires_in * 1e3;
+      s2.settings.update({ externalKeys: keys });
+      s2.activity.record("settings.oauth", `Saved Google OAuth token for ${data.email || "user"}`);
+    }
+    return c.json({
+      valid: true,
+      email: data.email || null,
+      scope: data.scope || null,
+      expires_in: data.expires_in || null
+    });
+  } catch (err) {
+    return c.json({ valid: false, error: err instanceof Error ? err.message : "Token validation request failed" });
+  }
+});
+oauthRoutes.post("/oauth/claude/auth-url", async (c) => {
+  const { redirect_uri, client_id, client_secret } = await body(
+    c,
+    external_exports.object({
+      redirect_uri: external_exports.string().url(),
+      client_id: external_exports.string().min(1).optional(),
+      client_secret: external_exports.string().min(1).optional()
+    })
+  );
+  const s2 = c.env.agent.services;
+  const current = s2.settings.get();
+  const keys = { ...current.externalKeys };
+  const effectiveClientId = client_id || keys.anthropicClientId;
+  if (!effectiveClientId) {
+    return c.json(
+      { error: "Anthropic Claude Client ID is required to initiate OAuth flow." },
+      400
+    );
+  }
+  if (client_id || client_secret) {
+    if (client_id) keys.anthropicClientId = client_id.trim();
+    if (client_secret) keys.anthropicClientSecret = client_secret.trim();
+    s2.settings.update({ externalKeys: keys });
+  }
+  const state = Math.random().toString(36).substring(2, 15);
+  const authUrl = new URL("https://console.anthropic.com/oauth/authorize");
+  authUrl.searchParams.set("client_id", effectiveClientId);
+  authUrl.searchParams.set("redirect_uri", redirect_uri);
+  authUrl.searchParams.set("response_type", "code");
+  authUrl.searchParams.set("scope", "messages:write");
+  authUrl.searchParams.set("state", state);
+  return c.json({
+    url: authUrl.toString(),
+    state,
+    client_id: effectiveClientId
+  });
+});
+oauthRoutes.post("/oauth/claude/exchange", async (c) => {
+  const { code, redirect_uri, client_id, client_secret } = await body(
+    c,
+    external_exports.object({
+      code: external_exports.string().min(1),
+      redirect_uri: external_exports.string().url(),
+      client_id: external_exports.string().optional(),
+      client_secret: external_exports.string().optional()
+    })
+  );
+  const s2 = c.env.agent.services;
+  const current = s2.settings.get();
+  const keys = { ...current.externalKeys };
+  const effectiveClientId = client_id || keys.anthropicClientId;
+  const effectiveClientSecret = client_secret || keys.anthropicClientSecret;
+  if (!effectiveClientId || !effectiveClientSecret) {
+    return c.json(
+      { error: "Claude Client ID and Client Secret are required to exchange authorization code." },
+      400
+    );
+  }
+  try {
+    const tokenRes = await fetch("https://api.anthropic.com/v1/oauth/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        code,
+        client_id: effectiveClientId,
+        client_secret: effectiveClientSecret,
+        redirect_uri,
+        grant_type: "authorization_code"
+      }).toString()
+    });
+    const tokenData = await tokenRes.json();
+    if (!tokenRes.ok || !tokenData.access_token) {
+      return c.json(
+        { error: tokenData.error_description || tokenData.error || "Failed to exchange code with Anthropic" },
+        400
+      );
+    }
+    keys.anthropicOAuthToken = tokenData.access_token;
+    if (tokenData.refresh_token) keys.anthropicOAuthRefreshToken = tokenData.refresh_token;
+    keys.anthropicClientId = effectiveClientId;
+    keys.anthropicClientSecret = effectiveClientSecret;
+    const updated = s2.settings.update({ externalKeys: keys });
+    s2.activity.record("settings.oauth", "Claude OAuth connected");
+    return c.json({
+      success: true,
+      provider: "anthropic",
+      connected: true,
+      settings: updated
+    });
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : "Exchange network error" }, 500);
+  }
+});
+oauthRoutes.post("/oauth/claude/validate-token", async (c) => {
+  const { token, save } = await body(
+    c,
+    external_exports.object({
+      token: external_exports.string().min(1),
+      save: external_exports.boolean().optional()
+    })
+  );
+  const clean = token.trim().replace(/^Bearer\s+/i, "");
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/models", {
+      headers: {
+        Authorization: `Bearer ${clean}`,
+        "anthropic-version": "2023-06-01",
+        "anthropic-client": "claude-code",
+        "User-Agent": "claude-code/0.2.29"
+      }
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401 || res.status === 403 || data.error?.type === "authentication_error") {
+      return c.json({
+        valid: false,
+        error: data.error?.message || "Authentication failed. Token is invalid, expired, or unauthorized."
+      });
+    }
+    if (save) {
+      const s2 = c.env.agent.services;
+      const current = s2.settings.get();
+      const keys = { ...current.externalKeys };
+      keys.anthropicOAuthToken = clean;
+      s2.settings.update({ externalKeys: keys });
+      s2.activity.record("settings.oauth", "Saved Claude OAuth token");
+    }
+    return c.json({ valid: true, status: res.status });
+  } catch (err) {
+    return c.json({ valid: false, error: err instanceof Error ? err.message : "Validation ping failed" });
+  }
+});
+oauthRoutes.post("/oauth/token", async (c) => {
+  const { provider, token, refresh_token } = await body(
+    c,
+    external_exports.object({
+      provider: external_exports.enum(["anthropic", "gemini"]),
+      token: external_exports.string().min(1).max(4096),
+      refresh_token: external_exports.string().max(4096).optional()
+    })
+  );
+  const s2 = c.env.agent.services;
+  const current = s2.settings.get();
+  const externalKeys = { ...current.externalKeys };
+  if (provider === "anthropic") {
+    externalKeys.anthropicOAuthToken = token.trim();
+  } else if (provider === "gemini") {
+    externalKeys.googleOAuthToken = token.trim();
+    if (refresh_token) externalKeys.googleRefreshToken = refresh_token.trim();
+  }
+  const updated = s2.settings.update({ externalKeys });
+  s2.activity.record("settings.oauth", `Updated ${provider} OAuth credentials`);
+  return c.json({
+    success: true,
+    provider,
+    connected: true,
+    settings: updated
+  });
+});
+oauthRoutes.post("/oauth/disconnect", async (c) => {
+  const { provider } = await body(c, external_exports.object({ provider: external_exports.enum(["anthropic", "gemini"]) }));
+  const s2 = c.env.agent.services;
+  const current = s2.settings.get();
+  const externalKeys = { ...current.externalKeys };
+  if (provider === "anthropic") {
+    delete externalKeys.anthropicOAuthToken;
+    delete externalKeys.anthropicOAuthRefreshToken;
+    delete externalKeys.anthropicClientId;
+    delete externalKeys.anthropicClientSecret;
+  } else if (provider === "gemini") {
+    delete externalKeys.googleOAuthToken;
+    delete externalKeys.googleRefreshToken;
+    delete externalKeys.googleClientId;
+    delete externalKeys.googleClientSecret;
+    delete externalKeys.googleTokenExpiry;
+    delete externalKeys.googleUserEmail;
+  }
+  const updated = s2.settings.update({ externalKeys });
+  s2.activity.record("settings.oauth", `Disconnected ${provider} OAuth`);
+  return c.json({ success: true, provider, connected: false, settings: updated });
+});
+
+// src/api/app.ts
+function createApi() {
+  const app = new Hono3().basePath("/api");
+  app.onError((err) => errorResponse(err));
+  app.notFound(() => errorResponse(new NotFoundError("Unknown API route")));
+  app.use("*", securityHeaders);
+  app.use("*", remoteAuth);
+  app.use("*", csrfProtection);
+  app.use("*", requireSession);
+  app.route("/", semanticRoutes);
+  app.route("/", systemRoutes);
+  app.route("/auth", authRoutes);
+  app.route("/", chatRoutes);
+  app.route("/", dataRoutes);
+  app.route("/", automationRoutes);
+  app.route("/", pushRoutes);
+  app.route("/", remoteRoutes);
+  app.route("/mcp", mcpRoutes);
+  app.route("/", rulesRoutes);
+  app.route("/", skillsRoutes);
+  app.route("/", modelsRoutes);
+  app.route("/", marketplaceRoutes);
+  app.route("/", oauthRoutes);
+  return app;
+}
+__name(createApi, "createApi");
+
+// src/ai/mock.ts
+var MockAIProvider = class {
+  constructor(chunkDelayMs = 25) {
+    this.chunkDelayMs = chunkDelayMs;
+  }
+  chunkDelayMs;
+  static {
+    __name(this, "MockAIProvider");
+  }
+  id = "mock";
+  model = "mock";
+  billable = false;
+  async generate(req) {
+    const last = req.messages.at(-1)?.content ?? "";
+    const text2 = `Summary: ${last.slice(0, 200)}`;
+    return { text: text2, usage: estimatedUsage(this, req.system.length + JSON.stringify(req.messages).length, text2.length) };
+  }
+  async *stream(req) {
+    yield* this.generateWithTools({ ...req, tools: [], maxIterations: 1, toolBudgetExhausted: /* @__PURE__ */ __name(() => true, "toolBudgetExhausted") });
+  }
+  async *generateWithTools(req) {
+    const input2 = req.messages.at(-1)?.content.trim() ?? "";
+    const plan = planTools(input2);
+    let reply = "";
+    let calls = 0;
+    for (const step of plan) {
+      const tool5 = req.tools.find((t2) => t2.name === step.name);
+      if (!tool5) continue;
+      if (calls >= req.maxIterations * 4 || req.toolBudgetExhausted()) break;
+      calls++;
+      const id2 = `mock_${calls}`;
+      yield { type: "tool-start", id: id2, name: tool5.name, input: step.input };
+      try {
+        const output2 = await tool5.execute(step.input, id2);
+        yield { type: "tool-end", id: id2, name: tool5.name, output: output2 };
+        reply += step.describe(output2);
+      } catch (error62) {
+        const message = error62 instanceof Error ? error62.message : String(error62);
+        yield { type: "tool-end", id: id2, name: tool5.name, output: null, error: message };
+        reply += `I couldn't complete that: ${message}`;
+      }
+    }
+    if (!reply) {
+      reply = `(Demo mode) You said: "${input2.slice(0, 500)}". Connect Workers AI for real answers \u2014 tasks, notes, memories and reminders work either way.`;
+    }
+    let outputChars = 0;
+    for (const chunk of reply.match(/\S+\s*/g) ?? [reply]) {
+      if (req.signal?.aborted) break;
+      outputChars += chunk.length;
+      yield { type: "text", delta: chunk };
+      await new Promise((r2) => setTimeout(r2, this.chunkDelayMs));
+    }
+    yield {
+      type: "usage",
+      usage: estimatedUsage(this, req.system.length + JSON.stringify(req.messages).length, outputChars)
+    };
+  }
+};
+function planTools(text2) {
+  let m;
+  if (m = text2.match(/^remember(?: that)?\s+(.+)$/i)) {
+    return [{ name: "remember", input: { content: m[1], category: "preference" }, describe: /* @__PURE__ */ __name(() => `Got it \u2014 I'll remember that ${m[1]}.`, "describe") }];
+  }
+  if (m = text2.match(/^(?:add|create) (?:a )?task(?: to)?\s*:?\s+(.+)$/i)) {
+    return [{ name: "create_task", input: { title: m[1] }, describe: /* @__PURE__ */ __name(() => `Added the task "${m[1]}".`, "describe") }];
+  }
+  if (m = text2.match(/^(?:add|create|write) (?:a )?note\s*:?\s+(.+)$/i)) {
+    return [{ name: "create_note", input: { title: m[1].slice(0, 80), content: m[1] }, describe: /* @__PURE__ */ __name(() => `Saved a note.`, "describe") }];
+  }
+  if (m = text2.match(/^(?:complete|finish|mark) (?:the )?task\s+(.+?)(?: as (?:done|completed))?$/i)) {
+    return [{ name: "complete_task", input: { task: m[1] }, describe: /* @__PURE__ */ __name(() => `Marked "${m[1]}" as done.`, "describe") }];
+  }
+  if (m = text2.match(/^(?:delete|remove) (?:the )?task\s+(.+)$/i)) {
+    return [{ name: "delete_task", input: { task: m[1] }, describe: /* @__PURE__ */ __name(() => `I've asked to delete "${m[1]}". Approve it above if you want it gone.`, "describe") }];
+  }
+  if (m = text2.match(/^rewrite note (\S+) as:\s*(.+)$/i)) {
+    return [{ name: "replace_note_content", input: { id: m[1], content: m[2] }, describe: /* @__PURE__ */ __name(() => "I've proposed new text for that note. Approve it above to save it.", "describe") }];
+  }
+  if (/^(?:list|show)(?: my)? tasks|what should i work on/i.test(text2)) {
+    return [
+      {
+        name: "list_tasks",
+        input: { view: "open" },
+        describe: /* @__PURE__ */ __name((out) => {
+          const tasks = (out?.tasks ?? []).map((t2) => `- ${t2.title}`);
+          return tasks.length ? `Here are your open tasks:
+
+${tasks.join("\n")}` : "You have no open tasks.";
+        }, "describe")
+      }
+    ];
+  }
+  if (m = text2.match(/^remind me in (\d+) minutes? to (.+)$/i)) {
+    return [
+      {
+        name: "create_reminder",
+        input: { message: m[2], in_minutes: Number(m[1]) },
+        describe: /* @__PURE__ */ __name(() => `I'll remind you in ${m[1]} minutes to ${m[2]}.`, "describe")
+      }
+    ];
+  }
+  if (m = text2.match(/^(?:search|find)\s+(.+)$/i)) {
+    return [{ name: "search", input: { query: m[1] }, describe: /* @__PURE__ */ __name((out) => `Search results:
+
+\`\`\`json
+${JSON.stringify(out, null, 2).slice(0, 1500)}
+\`\`\``, "describe") }];
+  }
+  return [];
+}
+__name(planTools, "planTools");
 
 // src/semantic/neighbors.ts
 async function semanticNeighbors(services, env, memory, opts) {

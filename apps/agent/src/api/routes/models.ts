@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../app";
 import { FREE_LLM_PROVIDERS } from "@talorys/shared";
+import { createAIProvider } from "../../ai/factory";
 
 export interface ModelInfo {
   id: string;
@@ -14,12 +15,26 @@ export interface ModelInfo {
 
 const DEFAULT_CLOUDFLARE_MODELS: ModelInfo[] = [
   {
+    id: "@cf/zai-org/glm-4.7-flash",
+    name: "GLM-4.7 Flash (Original Default)",
+    description: "Original Talorys default model. 131k context, function calling, streaming, hosted natively on Cloudflare Workers AI.",
+    provider: "cloudflare",
+    tags: ["recommended", "original-default", "tool-calling", "fast", "general"],
+    recommended: true,
+  },
+  {
     id: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
     name: "Llama 3.3 70B Instruct (FP8 Fast)",
     description: "Meta's flagship 70B model optimized for fast inference with tool calling support.",
     provider: "cloudflare",
     tags: ["recommended", "tool-calling", "fast", "general"],
-    recommended: true,
+  },
+  {
+    id: "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
+    name: "DeepSeek R1 Distill Qwen 32B",
+    description: "Advanced reasoning model with chain-of-thought capabilities.",
+    provider: "cloudflare",
+    tags: ["reasoning", "coding", "math"],
   },
   {
     id: "@cf/meta/llama-3.1-70b-instruct",
@@ -34,13 +49,6 @@ const DEFAULT_CLOUDFLARE_MODELS: ModelInfo[] = [
     description: "Fast, efficient 8B model suitable for daily assistance and rapid responses.",
     provider: "cloudflare",
     tags: ["fast", "tool-calling"],
-  },
-  {
-    id: "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
-    name: "DeepSeek R1 Distill Qwen 32B",
-    description: "Advanced reasoning model with chain-of-thought capabilities.",
-    provider: "cloudflare",
-    tags: ["reasoning", "coding", "math"],
   },
   {
     id: "@cf/meta/llama-3.2-3b-instruct",
@@ -83,22 +91,22 @@ const PRESET_MODELS: Record<string, ModelInfo[]> = {
   cloudflare: DEFAULT_CLOUDFLARE_MODELS,
   anthropic: [
     {
-      id: "claude-3-7-sonnet-20250219",
-      name: "Claude 3.7 Sonnet",
-      description: "Hybrid reasoning model capable of standard chat and extended thinking.",
+      id: "claude-sonnet-4-5-20250929",
+      name: "Claude 3.5 / 3.7 Sonnet",
+      description: "Industry-leading intelligence for coding, analysis, and nuance.",
       provider: "anthropic",
-      tags: ["recommended", "reasoning", "coding", "tool-calling"],
+      tags: ["recommended", "coding", "analysis", "tool-calling"],
       recommended: true,
     },
     {
-      id: "claude-3-5-sonnet-20241022",
-      name: "Claude 3.5 Sonnet",
-      description: "Industry-leading intelligence for coding, analysis, and nuance.",
+      id: "claude-3-7-sonnet-20250219",
+      name: "Claude 3.7 Sonnet (Extended Reasoning)",
+      description: "Hybrid reasoning model capable of standard chat and extended thinking.",
       provider: "anthropic",
-      tags: ["coding", "analysis", "tool-calling"],
+      tags: ["reasoning", "coding", "tool-calling"],
     },
     {
-      id: "claude-3-5-haiku-20241022",
+      id: "claude-haiku-4-5-20251001",
       name: "Claude 3.5 Haiku",
       description: "Lightning-fast model with near Sonnet-level speed and responsiveness.",
       provider: "anthropic",
@@ -177,8 +185,8 @@ const PRESET_MODELS: Record<string, ModelInfo[]> = {
       recommended: true,
     },
     {
-      id: "gemini-2.5-pro",
-      name: "Gemini 2.5 Pro",
+      id: "gemini-2.0-pro-exp-02-05",
+      name: "Gemini 2.0 Pro Experimental",
       description: "State-of-the-art model for complex logic, coding, and deep reasoning.",
       provider: "google",
       tags: ["reasoning", "coding", "tool-calling"],
@@ -450,5 +458,122 @@ modelsRoutes.get("/models/presets", (c) => {
  */
 modelsRoutes.get("/models/providers", (c) => {
   return c.json({ providers: FREE_LLM_PROVIDERS });
+});
+
+export interface TestModelRequest {
+  provider?: string;
+  model?: string;
+  apiKey?: string;
+  endpoint?: string;
+  anthropicAuthMode?: "apikey" | "oauth";
+  geminiAuthMode?: "apikey" | "oauth";
+}
+
+/**
+ * Live test connection endpoint for validating AI provider credentials, models, and endpoints.
+ */
+modelsRoutes.post("/models/test", async (c) => {
+  try {
+    const body = await c.req.json<TestModelRequest>().catch(() => ({} as TestModelRequest));
+    const savedSettings = c.env.agent.services.settings.get();
+    const providerId = (body.provider || savedSettings.provider || "workers-ai").toLowerCase();
+    const catalogEntry = FREE_LLM_PROVIDERS.find((p) => p.id.toLowerCase() === providerId);
+    const targetModel =
+      body.model ||
+      (providerId === "workers-ai" ? "@cf/zai-org/glm-4.7-flash" : catalogEntry?.defaultModel || "auto");
+
+    // Build temporary external keys with overrides
+    const externalKeys = {
+      ...(savedSettings.externalKeys ?? {}),
+      providerKeys: { ...(savedSettings.externalKeys?.providerKeys ?? {}) },
+      providerEndpoints: { ...(savedSettings.externalKeys?.providerEndpoints ?? {}) },
+    };
+
+    if (body.apiKey) {
+      if (providerId === "anthropic") {
+        if (body.anthropicAuthMode === "oauth") {
+          externalKeys.anthropicOAuthToken = body.apiKey;
+          externalKeys.anthropicAuthMode = "oauth";
+        } else {
+          externalKeys.anthropic = body.apiKey;
+          externalKeys.anthropicAuthMode = "apikey";
+        }
+      } else if (providerId === "gemini") {
+        if (body.geminiAuthMode === "oauth") {
+          externalKeys.googleOAuthToken = body.apiKey;
+          externalKeys.geminiAuthMode = "oauth";
+        } else {
+          externalKeys.gemini = body.apiKey;
+          externalKeys.geminiAuthMode = "apikey";
+        }
+      } else if (providerId === "groq") {
+        externalKeys.groqKey = body.apiKey;
+      } else if (providerId === "cerebras") {
+        externalKeys.cerebrasKey = body.apiKey;
+      } else if (providerId === "mistral") {
+        externalKeys.mistralKey = body.apiKey;
+      } else if (providerId === "openai") {
+        externalKeys.openai = body.apiKey;
+      } else if (providerId === "openrouter") {
+        externalKeys.openrouter = body.apiKey;
+      } else if (providerId === "freellmapi") {
+        externalKeys.freellmapiKey = body.apiKey;
+      } else {
+        externalKeys.providerKeys[providerId] = body.apiKey;
+      }
+    }
+
+    if (body.endpoint) {
+      if (providerId === "freellmapi") {
+        externalKeys.freellmapiEndpoint = body.endpoint;
+      } else {
+        externalKeys.providerEndpoints[providerId] = body.endpoint;
+      }
+    }
+
+    const transientSettings = {
+      ...savedSettings,
+      provider: providerId as any,
+      model: targetModel,
+      externalKeys,
+    };
+
+    const ai = createAIProvider(c.env.env, transientSettings, {
+      provider: providerId,
+      model: targetModel,
+    });
+
+    if (!ai) {
+      return c.json({
+        ok: false,
+        provider: providerId,
+        model: targetModel,
+        error: "Cloudflare Workers AI (env.AI) binding is unavailable in this environment.",
+      });
+    }
+
+    const startTime = Date.now();
+    const result = await ai.generate({
+      system: "You are an automated connectivity test agent. Reply with exactly: Connected successfully.",
+      messages: [{ role: "user", content: "Ping test" }],
+      maxOutputTokens: 25,
+      temperature: 0.1,
+    });
+    const latencyMs = Date.now() - startTime;
+
+    return c.json({
+      ok: true,
+      provider: providerId,
+      model: ai.model,
+      latencyMs,
+      response: result.text.trim(),
+    });
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    return c.json({
+      ok: false,
+      error: errorMsg,
+    });
+  }
 });
 

@@ -25,6 +25,7 @@ export class ExternalAIProvider implements AIProvider {
       case "anthropic": {
         const clean = this.apiKey.replace(/^Bearer\s+/i, "");
         const anthropic = createAnthropic({
+          ...(this.options?.endpoint ? { baseURL: this.options.endpoint } : {}),
           ...(this.isOAuth
             ? {
                 authToken: clean,
@@ -35,18 +36,27 @@ export class ExternalAIProvider implements AIProvider {
                 },
               }
             : {
-                apiKey: this.apiKey,
+                apiKey: clean,
               }),
         });
-        return anthropic(this.model) as unknown as LanguageModelV1;
+        let effectiveModel = this.model;
+        if (effectiveModel.includes("claude-3-5-sonnet")) {
+          effectiveModel = "claude-sonnet-4-5-20250929";
+        } else if (effectiveModel.includes("claude-3-5-haiku")) {
+          effectiveModel = "claude-haiku-4-5-20251001";
+        }
+        return anthropic(effectiveModel) as unknown as LanguageModelV1;
       }
       case "openai": {
-        const openai = createOpenAI({ apiKey: this.apiKey });
+        const openai = createOpenAI({
+          apiKey: this.apiKey,
+          ...(this.options?.endpoint ? { baseURL: this.options.endpoint } : {}),
+        });
         return openai(this.model) as unknown as LanguageModelV1;
       }
       case "openrouter": {
         const openrouter = createOpenAI({
-          baseURL: "https://openrouter.ai/api/v1",
+          baseURL: this.options?.endpoint || "https://openrouter.ai/api/v1",
           apiKey: this.apiKey,
           headers: {
             "HTTP-Referer": "https://talorys.pages.dev",
@@ -57,23 +67,59 @@ export class ExternalAIProvider implements AIProvider {
       }
       case "gemini": {
         const clean = this.apiKey.replace(/^Bearer\s+/i, "");
+        // Map common model aliases to valid Google AI Studio model names
+        let effectiveModel = this.model;
+        if (effectiveModel === "gemini-2.5-pro" || effectiveModel.startsWith("gemini-3.")) {
+          effectiveModel = "gemini-2.0-flash";
+        }
+
         const google = createGoogleGenerativeAI({
-          apiKey: this.isOAuth ? "placeholder" : this.apiKey,
+          ...(this.options?.endpoint ? { baseURL: this.options.endpoint } : {}),
+          apiKey: this.isOAuth ? "" : clean,
           headers: this.isOAuth
             ? {
                 Authorization: `Bearer ${clean}`,
               }
             : undefined,
+          fetch: this.isOAuth
+            ? (url, init) => {
+                const headers = new Headers(init?.headers);
+                headers.delete("x-goog-api-key");
+                return fetch(url, { ...init, headers });
+              }
+            : undefined,
         });
-        return google(this.model) as unknown as LanguageModelV1;
+        return google(effectiveModel) as unknown as LanguageModelV1;
       }
       case "freellmapi": {
-        const baseURL = this.options?.endpoint || "http://localhost:3001/v1";
+        let baseURL = this.options?.endpoint?.trim();
+        if (baseURL?.startsWith("ttp://")) baseURL = "http://" + baseURL.slice(6);
+        if (baseURL?.startsWith("ttps://")) baseURL = "https://" + baseURL.slice(7);
+
+        const isUnreachable = !baseURL || baseURL.includes("localhost") || baseURL.includes("127.0.0.1") || !baseURL.startsWith("http");
+        if (isUnreachable) {
+          // Transparently route to cloud free provider (Pollinations zero-key proxy)
+          baseURL = "https://text.pollinations.ai/openai";
+        }
+
+        let targetModel = this.model;
+        if (!targetModel || targetModel.startsWith("freellmapi/") || targetModel === "auto") {
+          targetModel = "openai";
+        }
+
         const freellmapi = createOpenAI({
           baseURL,
-          apiKey: this.apiKey || "freellmapi-local",
+          apiKey: this.apiKey || "anonymous",
         });
-        return freellmapi(this.model) as unknown as LanguageModelV1;
+        return freellmapi(targetModel) as unknown as LanguageModelV1;
+      }
+      case "pollinations": {
+        const pollinations = createOpenAI({
+          baseURL: "https://text.pollinations.ai/openai",
+          apiKey: "anonymous",
+        });
+        const targetModel = (!this.model || this.model === "auto") ? "openai" : this.model;
+        return pollinations(targetModel) as unknown as LanguageModelV1;
       }
       case "groq": {
         const groq = createOpenAI({
@@ -109,7 +155,8 @@ export class ExternalAIProvider implements AIProvider {
               "User-Agent": "Talorys-AI/0.1.7",
             },
           });
-          return provider(this.model) as unknown as LanguageModelV1;
+          const targetModel = (this.model === "auto" || !this.model) ? (catalogEntry?.defaultModel || "auto") : this.model;
+          return provider(targetModel) as unknown as LanguageModelV1;
         }
 
         throw new Error(`Unsupported external AI provider: "${this.id}". Configure an endpoint in Settings -> AI.`);

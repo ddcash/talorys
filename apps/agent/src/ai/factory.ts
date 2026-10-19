@@ -15,7 +15,8 @@ export function createAIProvider(
 
   if (providerId === "workers-ai") {
     if (!env.AI) return null;
-    return new CloudflareWorkersAIProvider(env.AI, model);
+    const finalModel = (!model || model === "auto") ? "@cf/zai-org/glm-4.7-flash" : model;
+    return new CloudflareWorkersAIProvider(env.AI, finalModel);
   }
 
   let credential: string | undefined = undefined;
@@ -30,22 +31,50 @@ export function createAIProvider(
 
   // Named credential checks
   if (providerId === "anthropic") {
-    if (settings.externalKeys?.anthropicOAuthToken) {
+    const authMode = settings.externalKeys?.anthropicAuthMode;
+    if (authMode === "apikey" && settings.externalKeys?.anthropic) {
+      credential = settings.externalKeys.anthropic;
+      isOAuth = false;
+    } else if (authMode === "oauth" && settings.externalKeys?.anthropicOAuthToken) {
       credential = settings.externalKeys.anthropicOAuthToken;
       isOAuth = true;
-    } else {
-      credential = settings.externalKeys?.anthropic;
+    } else if (settings.externalKeys?.anthropic) {
+      // Default to standard Anthropic API key if provided
+      credential = settings.externalKeys.anthropic;
+      isOAuth = false;
+    } else if (settings.externalKeys?.anthropicOAuthToken) {
+      credential = settings.externalKeys.anthropicOAuthToken;
+      isOAuth = true;
     }
   } else if (providerId === "gemini") {
-    if (settings.externalKeys?.googleOAuthToken) {
+    const authMode = settings.externalKeys?.geminiAuthMode;
+    if (authMode === "apikey" && settings.externalKeys?.gemini) {
+      credential = settings.externalKeys.gemini;
+      isOAuth = false;
+    } else if (authMode === "oauth" && settings.externalKeys?.googleOAuthToken) {
       credential = settings.externalKeys.googleOAuthToken;
       isOAuth = true;
-    } else {
-      credential = settings.externalKeys?.gemini;
+    } else if (settings.externalKeys?.gemini) {
+      // Default to Google AI Studio API key if provided
+      credential = settings.externalKeys.gemini;
+      isOAuth = false;
+    } else if (settings.externalKeys?.googleOAuthToken) {
+      credential = settings.externalKeys.googleOAuthToken;
+      isOAuth = true;
     }
   } else if (providerId === "freellmapi") {
-    credential = settings.externalKeys?.freellmapiKey || "freellmapi-local";
-    options = { endpoint: settings.externalKeys?.freellmapiEndpoint || "http://localhost:3001/v1" };
+    credential = settings.externalKeys?.freellmapiKey || "freellmapi-cloud";
+    let ep = settings.externalKeys?.freellmapiEndpoint?.trim();
+    if (ep?.startsWith("ttp://")) ep = "http://" + ep.slice(6);
+    if (ep?.startsWith("ttps://")) ep = "https://" + ep.slice(7);
+    if (ep && !ep.includes("localhost") && !ep.includes("127.0.0.1") && ep.startsWith("http")) {
+      options = { endpoint: ep };
+    } else {
+      options = { endpoint: "https://text.pollinations.ai/openai" };
+    }
+  } else if (providerId === "pollinations") {
+    credential = "anonymous";
+    options = { endpoint: "https://text.pollinations.ai/openai" };
   } else if (providerId === "groq") {
     credential = settings.externalKeys?.groqKey || settings.externalKeys?.openai;
   } else if (providerId === "cerebras") {

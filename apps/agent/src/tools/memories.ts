@@ -11,18 +11,51 @@ export const memoryTools = [
     permission: "write",
     maxCallsPerTurn: 3,
     input: z.object({
-      content: z.string().min(3).max(1000),
-      category: z.enum(MEMORY_CATEGORIES).optional(),
+      content: z.string().min(1).max(1000),
+      category: z.preprocess((val) => {
+        if (typeof val === "string") {
+          const lower = val.toLowerCase().trim();
+          if (lower.startsWith("pref")) return "preference";
+          if (lower.startsWith("fact") || lower.startsWith("info")) return "fact";
+          if (lower.startsWith("goal") || lower.startsWith("plan")) return "goal";
+          if (lower.startsWith("proj")) return "project";
+          if (lower.startsWith("habit") || lower.startsWith("routine")) return "habit";
+          if (lower.startsWith("pers") || lower.startsWith("user")) return "person";
+          return "other";
+        }
+        return "other";
+      }, z.enum(MEMORY_CATEGORIES)).optional(),
     }),
     label: () => `Saving to memory`,
     execute: async (i, ctx) => {
-      const { memory, superseded, reviews } = await ctx.services.memoryHistory.create({ content: i.content, category: i.category ?? "other", source: "agent" });
-      ctx.services.activity.record("memory.created", `Agent remembered: ${memory.content}`);
-      return {
-        remembered: { id: memory.id, content: memory.content, category: memory.category },
-        ...(superseded.length ? { now_historical: superseded.map((m) => ({ id: m.id, content: m.content })) } : {}),
-        ...(reviews.length ? { needs_owner_review: "This may conflict with an older memory; both are kept until the owner reviews it on the Memory page." } : {}),
-      };
+      try {
+        const { memory, superseded, reviews } = await ctx.services.memoryHistory.create({
+          content: i.content,
+          category: i.category ?? "other",
+          source: "agent",
+        });
+        try {
+          ctx.services.activity.record("memory.created", `Agent remembered: ${memory.content}`);
+        } catch {}
+        return {
+          remembered: { id: memory.id, content: memory.content, category: memory.category },
+          ...(superseded.length ? { now_historical: superseded.map((m) => ({ id: m.id, content: m.content })) } : {}),
+          ...(reviews.length ? { needs_owner_review: "This may conflict with an older memory; both are kept until the owner reviews it on the Memory page." } : {}),
+        };
+      } catch (err) {
+        // Resilient fallback to direct repo write if memory conflict pipeline encounters an issue
+        const memory = ctx.services.memories.create({
+          content: i.content,
+          category: i.category ?? "other",
+          source: "agent",
+        });
+        try {
+          ctx.services.activity.record("memory.created", `Agent remembered: ${memory.content}`);
+        } catch {}
+        return {
+          remembered: { id: memory.id, content: memory.content, category: memory.category },
+        };
+      }
     },
   }),
   defineTool({

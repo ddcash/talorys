@@ -153,8 +153,12 @@ export const FREE_LLM_PROVIDERS: FreeLLMProviderInfo[] = [
     defaultBaseUrl: "builtin://cloudflare",
     requiresKey: false,
     freeTierNote: "10,000 free neurons / day built directly into Cloudflare",
-    defaultModel: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
-    popularModels: ["@cf/meta/llama-3.3-70b-instruct-fp8-fast", "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b"],
+    defaultModel: "@cf/zai-org/glm-4.7-flash",
+    popularModels: [
+      "@cf/zai-org/glm-4.7-flash",
+      "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+      "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b"
+    ],
     docUrl: "https://dash.cloudflare.com",
   },
 

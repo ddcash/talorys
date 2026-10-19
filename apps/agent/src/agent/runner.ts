@@ -239,11 +239,28 @@ export class AgentRunner {
       };
 
       const candidates: Array<{ provider: string; model: string }> = [primaryCandidate];
-      if (settings.autoFailover && settings.fallbacks?.length) {
+      if (settings.autoFailover !== false && settings.fallbacks?.length) {
         for (const fb of settings.fallbacks) {
           if (fb.provider !== primaryCandidate.provider || fb.model !== primaryCandidate.model) {
             candidates.push(fb);
           }
+        }
+      }
+
+      // Guaranteed resilient safety-net fallbacks when autoFailover is enabled:
+      // Always ensure the chat can recover to Cloudflare Workers AI and free providers
+      if (settings.autoFailover !== false) {
+        if (!candidates.some((c) => c.provider === "workers-ai" && c.model === "@cf/zai-org/glm-4.7-flash")) {
+          candidates.push({ provider: "workers-ai", model: "@cf/zai-org/glm-4.7-flash" });
+        }
+        if (!candidates.some((c) => c.provider === "workers-ai" && c.model === "@cf/meta/llama-3.3-70b-instruct-fp8-fast")) {
+          candidates.push({ provider: "workers-ai", model: "@cf/meta/llama-3.3-70b-instruct-fp8-fast" });
+        }
+        if (!candidates.some((c) => c.provider === "workers-ai" && c.model === "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b")) {
+          candidates.push({ provider: "workers-ai", model: "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b" });
+        }
+        if (!candidates.some((c) => c.provider === "pollinations")) {
+          candidates.push({ provider: "pollinations", model: "openai" });
         }
       }
 
@@ -275,8 +292,9 @@ export class AgentRunner {
 
           const requestExceeded = budget.maxDailyRequests > 0 && todayRequests >= budget.maxDailyRequests;
           const tokenExceeded = budget.maxDailyTokens > 0 && todayTokens >= budget.maxDailyTokens;
-          const freeTierViolation = budget.freeTierOnly && currentProvider.billable;
-          const costExceeded = budget.maxMonthlyCostUsd >= 0 && todayCost > budget.maxMonthlyCostUsd;
+          // Cloudflare Workers AI runs within the user's included free quota (10,000 Neurons/day)
+          const freeTierViolation = budget.freeTierOnly && currentProvider.billable && currentProvider.id !== "workers-ai";
+          const costExceeded = budget.maxMonthlyCostUsd > 0 && todayCost >= budget.maxMonthlyCostUsd;
 
           const budgetHit = requestExceeded || tokenExceeded || freeTierViolation || costExceeded;
 
@@ -361,7 +379,9 @@ export class AgentRunner {
           }
 
           const next = candidates[i + 1]!;
-          const notice = `*[Notice: ${candidate.provider} quota/rate limit reached. Failing over to ${next.provider} (${next.model})...]*\n\n`;
+          const rawErr = err instanceof Error ? err.message : String(err);
+          const brief = rawErr.length > 80 ? rawErr.slice(0, 77) + "..." : rawErr;
+          const notice = `*[Notice: ${candidate.provider} (${brief}). Failing over to ${next.provider} (${next.model})...]*\n\n`;
           yield { type: "text", delta: notice };
           text += notice;
         }

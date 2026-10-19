@@ -125,14 +125,33 @@ export class ToolExecutor {
     if (tool.maxCallsPerTurn !== undefined && used >= tool.maxCallsPerTurn) {
       throw new ToolError(`"${name}" was already used ${used} times in this request. Do not call it again.`);
     }
-    const parsed = tool.input.safeParse(rawInput ?? {});
+    let unwrappedInput = rawInput;
+    if (typeof unwrappedInput === "string") {
+      try {
+        unwrappedInput = JSON.parse(unwrappedInput);
+      } catch {
+        // Keep string
+      }
+    }
+    if (unwrappedInput && typeof unwrappedInput === "object" && !Array.isArray(unwrappedInput)) {
+      const obj = unwrappedInput as Record<string, unknown>;
+      if (obj.parameters && typeof obj.parameters === "object" && !Array.isArray(obj.parameters)) {
+        unwrappedInput = obj.parameters;
+      } else if (obj.arguments && typeof obj.arguments === "object" && !Array.isArray(obj.arguments)) {
+        unwrappedInput = obj.arguments;
+      } else if (obj.input && typeof obj.input === "object" && !Array.isArray(obj.input)) {
+        unwrappedInput = obj.input;
+      }
+    }
+
+    const parsed = tool.input.safeParse(unwrappedInput ?? {});
     if (!parsed.success) {
       const issue = parsed.error.issues[0];
       throw new ToolError(`Invalid input${issue ? ` at "${issue.path.join(".")}": ${issue.message}` : ""}.`);
     }
     const signature = `${name}:${stableStringify(parsed.data)}`;
     const repeats = this.signatures.get(signature) ?? 0;
-    if (repeats >= 1) {
+    if (repeats >= 2) {
       throw new ToolError("This exact call was already made in this request. Use the earlier result instead of repeating it.");
     }
     this.calls++;

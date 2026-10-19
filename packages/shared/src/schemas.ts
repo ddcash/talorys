@@ -278,6 +278,7 @@ export const externalKeysSchema = z.object({
   anthropicOAuthRefreshToken: z.string().optional(),
   anthropicClientId: z.string().optional(),
   anthropicClientSecret: z.string().optional(),
+  anthropicAuthMode: z.enum(["apikey", "oauth"]).optional(),
   // Google / Antigravity OAuth
   googleOAuthToken: z.string().optional(),
   googleRefreshToken: z.string().optional(),
@@ -285,6 +286,7 @@ export const externalKeysSchema = z.object({
   googleClientSecret: z.string().optional(),
   googleTokenExpiry: z.number().optional(),
   googleUserEmail: z.string().optional(),
+  geminiAuthMode: z.enum(["apikey", "oauth"]).optional(),
   // FreeLLMAPI & Free Tier Providers
   freellmapiEndpoint: z.string().optional(),
   freellmapiKey: z.string().optional(),

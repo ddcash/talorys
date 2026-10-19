@@ -33,6 +33,7 @@ import {
 } from "../hooks/queries";
 import { cn } from "../lib/utils";
 import { OAuthConnectModal } from "./OAuthConnectModal";
+import { api } from "../lib/api";
 
 interface ProviderDef {
   id: LLMProviderId;
@@ -52,27 +53,29 @@ interface ProviderDef {
 const DEFAULT_PROVIDER_INFO: ProviderDef = {
   id: "workers-ai",
   name: "Cloudflare Workers AI",
-  badge: "Native / Free-tier",
-  description: "Built-in serverless inference running directly on Cloudflare's global GPU network.",
+  badge: "Native / 10,000 Free Neurons",
+  description: "Built-in serverless inference running directly on Cloudflare's global GPU network with included free tier.",
 };
 
 const PROVIDERS: ProviderDef[] = [
   DEFAULT_PROVIDER_INFO,
   {
-    id: "freellmapi",
-    name: "FreeLLMAPI Gateway",
-    badge: "34 Free Providers / 635 Models",
-    description: "OpenAI-compatible aggregator proxy routing across 34 free LLM providers with automatic smart failover.",
-    keyName: "freellmapiKey",
-    keyLabel: "FreeLLMAPI Bearer Key (Optional)",
-    keyPlaceholder: "freellmapi-... (leave empty if unauthenticated)",
-    docsUrl: "https://github.com/tashfeenahmed/freellmapi",
-    isFreeGateway: true,
+    id: "gemini",
+    name: "Google AI Studio",
+    badge: "Free 1,500 RPD",
+    description: "High-speed multimodal intelligence with Gemini 2.0 Flash (free daily allowance, no card required).",
+    keyName: "gemini",
+    keyLabel: "Google Gemini API Key",
+    keyPlaceholder: "AIzaSy...",
+    docsUrl: "https://aistudio.google.com/app/apikey",
+    supportsOAuth: true,
+    oauthLabel: "Antigravity / Google OAuth Token",
+    oauthHint: "Authenticate Antigravity or Google Cloud via OAuth token (ya29... or access token) without an API key.",
   },
   {
     id: "groq",
     name: "Groq LPUs",
-    badge: "Free Ultra-Fast (250-800 T/s)",
+    badge: "Free 250-800 T/s",
     description: "Lightning-fast inference on Llama 3.3 70B & Mixtral with generous free tier allowances.",
     keyName: "groqKey",
     keyLabel: "Groq API Key",
@@ -82,7 +85,7 @@ const PROVIDERS: ProviderDef[] = [
   {
     id: "cerebras",
     name: "Cerebras Wafer-Scale",
-    badge: "Free World-Record Speed (2,100 T/s)",
+    badge: "Free 2,100 T/s Record",
     description: "Incredible 2,100+ tokens/sec on Llama 3.3 70B with high free limits.",
     keyName: "cerebrasKey",
     keyLabel: "Cerebras API Key",
@@ -100,10 +103,31 @@ const PROVIDERS: ProviderDef[] = [
     docsUrl: "https://console.mistral.ai/api-keys/",
   },
   {
+    id: "openrouter",
+    name: "OpenRouter",
+    badge: "20+ Permanent :free Models",
+    description: "Access any model across Anthropic, DeepSeek, Meta, and 20+ free community endpoints.",
+    keyName: "openrouter",
+    keyLabel: "OpenRouter API Key",
+    keyPlaceholder: "sk-or-v1-...",
+    docsUrl: "https://openrouter.ai/keys",
+  },
+  {
+    id: "freellmapi",
+    name: "FreeLLMAPI Gateway",
+    badge: "34 Free Providers / 635 Models",
+    description: "OpenAI-compatible aggregator proxy routing across 34 free LLM providers with automatic smart failover.",
+    keyName: "freellmapiKey",
+    keyLabel: "FreeLLMAPI Bearer Key (Optional)",
+    keyPlaceholder: "freellmapi-... (leave empty if unauthenticated)",
+    docsUrl: "https://github.com/tashfeenahmed/freellmapi",
+    isFreeGateway: true,
+  },
+  {
     id: "anthropic",
     name: "Anthropic Claude",
     badge: "Direct API & OAuth",
-    description: "Industry-leading reasoning with Claude 3.7 Sonnet, 3.5 Sonnet, and 3.5 Haiku.",
+    description: "Industry-leading reasoning with Claude 3.5 / 3.7 Sonnet and Haiku.",
     keyName: "anthropic",
     keyLabel: "Anthropic API Key",
     keyPlaceholder: "sk-ant-...",
@@ -111,19 +135,6 @@ const PROVIDERS: ProviderDef[] = [
     supportsOAuth: true,
     oauthLabel: "Claude OAuth Bearer Token",
     oauthHint: "Authenticate Claude using an OAuth token without an API key (Authorization: Bearer <token>).",
-  },
-  {
-    id: "gemini",
-    name: "Google / Antigravity",
-    badge: "Direct API & OAuth",
-    description: "High-speed multimodal intelligence with Gemini 2.0 Flash, Gemini 2.5 Pro, and Antigravity.",
-    keyName: "gemini",
-    keyLabel: "Google Gemini API Key",
-    keyPlaceholder: "AIzaSy...",
-    docsUrl: "https://aistudio.google.com/app/apikey",
-    supportsOAuth: true,
-    oauthLabel: "Antigravity / Google OAuth Token",
-    oauthHint: "Authenticate Antigravity or Google Cloud via OAuth token (ya29... or access token) without an API key.",
   },
   {
     id: "openai",
@@ -135,17 +146,356 @@ const PROVIDERS: ProviderDef[] = [
     keyPlaceholder: "sk-proj-...",
     docsUrl: "https://platform.openai.com/api-keys",
   },
-  {
-    id: "openrouter",
-    name: "OpenRouter",
-    badge: "Unified Gateway & Free Models",
-    description: "Access any model across Anthropic, DeepSeek, Meta, and hundreds of free ':free' community endpoints.",
-    keyName: "openrouter",
-    keyLabel: "OpenRouter API Key",
-    keyPlaceholder: "sk-or-v1-...",
-    docsUrl: "https://openrouter.ai/keys",
-  },
 ];
+
+export interface SetupGuide {
+  title: string;
+  badge: string;
+  badgeTone?: "accent" | "success" | "neutral";
+  summary: string;
+  steps: {
+    num: number;
+    text: string;
+    link?: { label: string; url: string };
+  }[];
+  freePresets: {
+    id: string;
+    label: string;
+    tag: string;
+    note: string;
+  }[];
+}
+
+export const PROVIDER_GUIDES: Record<string, SetupGuide> = {
+  "workers-ai": {
+    title: "Cloudflare Workers AI",
+    badge: "10,000 Free Neurons / Day",
+    badgeTone: "success",
+    summary: "Built-in serverless inference running directly on Cloudflare's global edge GPU network. Zero external API keys required.",
+    steps: [
+      {
+        num: 1,
+        text: "No external API key needed: Talorys executes Workers AI directly through the native Cloudflare runtime binding.",
+      },
+      {
+        num: 2,
+        text: "Select the original Talorys default model @cf/zai-org/glm-4.7-flash (131k context) or Meta's flagship Llama 3.3 70B.",
+      },
+      {
+        num: 3,
+        text: "Optional: If you want to dynamically query the live Cloudflare AI catalog, provide your Cloudflare Account ID and API Token below.",
+        link: { label: "Cloudflare Dashboard", url: "https://dash.cloudflare.com" },
+      },
+    ],
+    freePresets: [
+      {
+        id: "@cf/zai-org/glm-4.7-flash",
+        label: "GLM-4.7 Flash (Original Default)",
+        tag: "Original Default",
+        note: "131k context, function calling, fast inference",
+      },
+      {
+        id: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        label: "Llama 3.3 70B (FP8 Fast)",
+        tag: "Flagship 70B",
+        note: "Meta 70B model optimized for fast responses",
+      },
+      {
+        id: "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
+        label: "DeepSeek R1 Distill 32B",
+        tag: "Reasoning",
+        note: "Chain-of-thought advanced reasoning",
+      },
+    ],
+  },
+  gemini: {
+    title: "Google AI Studio / Gemini",
+    badge: "Free 15 RPM / 1,500 RPD",
+    badgeTone: "success",
+    summary: "Google's ultra-fast multimodal intelligence. Permanently free tier with generous daily allowances and no credit card required.",
+    steps: [
+      {
+        num: 1,
+        text: "Go to Google AI Studio and click 'Get API key' (free, instant, no card needed).",
+        link: { label: "Get Free Google API Key", url: "https://aistudio.google.com/app/apikey" },
+      },
+      {
+        num: 2,
+        text: "Copy your key starting with 'AIzaSy...' and paste it into the Google Gemini API Key field below.",
+      },
+      {
+        num: 3,
+        text: "Select 'gemini-2.0-flash' for ultra-fast chat or 'gemini-2.5-pro' for deep reasoning, then click 'Test Connection'.",
+      },
+    ],
+    freePresets: [
+      {
+        id: "gemini-2.0-flash",
+        label: "Gemini 2.0 Flash",
+        tag: "Recommended Free",
+        note: "1M context, multimodal, tool calling, 1,500 reqs/day free",
+      },
+      {
+        id: "gemini-2.5-pro",
+        label: "Gemini 2.5 Pro",
+        tag: "Deep Reasoning",
+        note: "Advanced reasoning for complex coding and logic",
+      },
+    ],
+  },
+  groq: {
+    title: "Groq LPUs",
+    badge: "250-800 T/s Free Speed",
+    badgeTone: "success",
+    summary: "World-class low latency powered by Groq's custom Language Processing Units with generous free tier allowances.",
+    steps: [
+      {
+        num: 1,
+        text: "Open the Groq Developer Console and create a free account (no credit card required).",
+        link: { label: "Get Free Groq Key", url: "https://console.groq.com/keys" },
+      },
+      {
+        num: 2,
+        text: "Click 'Create API Key', copy your key starting with 'gsk_...', and paste it below.",
+      },
+      {
+        num: 3,
+        text: "Pick 'llama-3.3-70b-versatile' or 'llama-3.1-8b-instant' and test connection.",
+      },
+    ],
+    freePresets: [
+      {
+        id: "llama-3.3-70b-versatile",
+        label: "Llama 3.3 70B Versatile",
+        tag: "250 T/s Free",
+        note: "Flagship 70B model with full tool calling",
+      },
+      {
+        id: "llama-3.1-8b-instant",
+        label: "Llama 3.1 8B Instant",
+        tag: "800 T/s Free",
+        note: "Sub-second near-instantaneous streaming",
+      },
+    ],
+  },
+  cerebras: {
+    title: "Cerebras Inference",
+    badge: "2,100+ T/s World Record",
+    badgeTone: "success",
+    summary: "Record-breaking wafer-scale inference engine providing 2,100+ tokens/sec on Llama 3.3 70B for free.",
+    steps: [
+      {
+        num: 1,
+        text: "Sign up at Cerebras Cloud to access free wafer-scale developer access.",
+        link: { label: "Get Free Cerebras Key", url: "https://cloud.cerebras.ai" },
+      },
+      {
+        num: 2,
+        text: "Generate an API key starting with 'csk-...' and paste it into the Cerebras field below.",
+      },
+      {
+        num: 3,
+        text: "Choose 'llama-3.3-70b' and test to experience instantaneous replies.",
+      },
+    ],
+    freePresets: [
+      {
+        id: "llama-3.3-70b",
+        label: "Llama 3.3 70B",
+        tag: "2,100 T/s Free",
+        note: "Massive 70B model at wafer-scale speed",
+      },
+      {
+        id: "llama-3.1-8b",
+        label: "Llama 3.1 8B",
+        tag: "2,800 T/s Free",
+        note: "Fastest text generation in the world",
+      },
+    ],
+  },
+  mistral: {
+    title: "Mistral AI",
+    badge: "Free La Plateforme Tier",
+    badgeTone: "success",
+    summary: "High-capability European foundation models with developer free tiers for Mistral Small and Codestral.",
+    steps: [
+      {
+        num: 1,
+        text: "Sign in to Mistral La Plateforme console.",
+        link: { label: "Get Free Mistral Key", url: "https://console.mistral.ai/api-keys/" },
+      },
+      {
+        num: 2,
+        text: "Create an API key starting with 'mis_...' and paste it below.",
+      },
+      {
+        num: 3,
+        text: "Select 'mistral-small-latest' for general chat or 'codestral-latest' for code.",
+      },
+    ],
+    freePresets: [
+      {
+        id: "mistral-small-latest",
+        label: "Mistral Small Latest",
+        tag: "General Free",
+        note: "Balanced, responsive, cost-effective",
+      },
+      {
+        id: "codestral-latest",
+        label: "Codestral 22B",
+        tag: "Coding Free",
+        note: "Specialized for programming and syntax",
+      },
+    ],
+  },
+  openrouter: {
+    title: "OpenRouter Gateway",
+    badge: "20+ Permanent :free Models",
+    badgeTone: "success",
+    summary: "Aggregator gateway providing direct access to 20+ free community models as well as Anthropic, OpenAI, and DeepSeek.",
+    steps: [
+      {
+        num: 1,
+        text: "Create a free OpenRouter account.",
+        link: { label: "Get OpenRouter Key", url: "https://openrouter.ai/keys" },
+      },
+      {
+        num: 2,
+        text: "Create a key starting with 'sk-or-v1-...' and paste it below.",
+      },
+      {
+        num: 3,
+        text: "Choose any model ending in ':free' to ensure completely free operation.",
+      },
+    ],
+    freePresets: [
+      {
+        id: "meta-llama/llama-3.3-70b-instruct:free",
+        label: "Llama 3.3 70B (Free)",
+        tag: "100% Free",
+        note: "Flagship Meta model with 0 token charges",
+      },
+      {
+        id: "google/gemini-2.0-flash-exp:free",
+        label: "Gemini 2.0 Flash Exp (Free)",
+        tag: "100% Free",
+        note: "Multimodal Gemini via OpenRouter free pool",
+      },
+      {
+        id: "deepseek/deepseek-r1:free",
+        label: "DeepSeek R1 (Free)",
+        tag: "100% Free",
+        note: "Open reasoning model with chain-of-thought",
+      },
+    ],
+  },
+  freellmapi: {
+    title: "FreeLLMAPI Unified Gateway",
+    badge: "34 Providers / 635 Models",
+    badgeTone: "accent",
+    summary: "Open-source aggregation gateway routing across 34 free providers with dynamic auto-failover and virtual fusion consensus.",
+    steps: [
+      {
+        num: 1,
+        text: "Run FreeLLMAPI locally via Docker/Node or connect to a public endpoint.",
+        link: { label: "FreeLLMAPI GitHub Repository", url: "https://github.com/tashfeenahmed/freellmapi" },
+      },
+      {
+        num: 2,
+        text: "If using a remote instance, enter the public URL (e.g. https://my-freellmapi.example.com/v1). Leave blank for built-in cloud free routing.",
+      },
+      {
+        num: 3,
+        text: "Set model to 'freellmapi/auto' to dynamically route to the highest-scoring available free model.",
+      },
+    ],
+    freePresets: [
+      {
+        id: "freellmapi/auto",
+        label: "FreeLLMAPI Auto Router",
+        tag: "Auto-Failover",
+        note: "Routes to fastest active free provider automatically",
+      },
+      {
+        id: "freellmapi/fusion",
+        label: "Virtual Fusion",
+        tag: "Consensus",
+        note: "Fans out to multiple free models and synthesizes answer",
+      },
+    ],
+  },
+  anthropic: {
+    title: "Anthropic Claude",
+    badge: "Direct API & OAuth",
+    badgeTone: "neutral",
+    summary: "Industry-leading reasoning with Claude 3.5 / 3.7 Sonnet. Supports direct API key or Claude Pro/Max OAuth Bearer authentication.",
+    steps: [
+      {
+        num: 1,
+        text: "For API keys: Generate a key in Anthropic Console. For Pro OAuth: switch to 'OAuth Token'.",
+        link: { label: "Anthropic Console", url: "https://console.anthropic.com/settings/keys" },
+      },
+      {
+        num: 2,
+        text: "Paste your API key (sk-ant-...) or connect your OAuth token.",
+      },
+      {
+        num: 3,
+        text: "Select 'claude-sonnet-4-5-20250929' or 'claude-3-7-sonnet-20250219'.",
+      },
+    ],
+    freePresets: [
+      {
+        id: "claude-sonnet-4-5-20250929",
+        label: "Claude 3.5 / 3.7 Sonnet",
+        tag: "State of Art",
+        note: "Top-tier intelligence for coding and nuance",
+      },
+      {
+        id: "claude-haiku-4-5-20251001",
+        label: "Claude 3.5 Haiku",
+        tag: "Fast",
+        note: "Rapid, responsive generation",
+      },
+    ],
+  },
+  openai: {
+    title: "OpenAI Platform",
+    badge: "Direct API",
+    badgeTone: "neutral",
+    summary: "Direct API access to GPT-4o, GPT-4o Mini, and o3-mini reasoning models.",
+    steps: [
+      {
+        num: 1,
+        text: "Create an API key in the OpenAI developer platform.",
+        link: { label: "OpenAI API Keys", url: "https://platform.openai.com/api-keys" },
+      },
+      {
+        num: 2,
+        text: "Paste your key starting with 'sk-proj-...' into the OpenAI key field below.",
+      },
+      {
+        num: 3,
+        text: "Choose 'gpt-4o' for flagship capabilities or 'gpt-4o-mini' for lightweight tasks.",
+      },
+    ],
+    freePresets: [
+      {
+        id: "gpt-4o",
+        label: "GPT-4o",
+        tag: "Omni Flagship",
+        note: "High intelligence multimodal reasoning",
+      },
+      {
+        id: "gpt-4o-mini",
+        label: "GPT-4o Mini",
+        tag: "Fast & Efficient",
+        note: "Fast daily assistant model",
+      },
+    ],
+  },
+};
+
 
 const LIMIT_FIELDS: { key: keyof Limits; label: string; hint: string }[] = [
   { key: "maxOutputTokens", label: "Max output tokens", hint: "Upper bound for each AI reply." },
@@ -175,10 +525,12 @@ export function AiSettingsCard({
 
   // Auth Mode Toggles (API Key vs OAuth)
   const [anthropicAuthMode, setAnthropicAuthMode] = useState<"apikey" | "oauth">(
-    settings.externalKeys?.anthropicOAuthToken ? "oauth" : "apikey"
+    settings.externalKeys?.anthropicAuthMode ??
+      (settings.externalKeys?.anthropicOAuthToken ? "oauth" : "apikey")
   );
   const [geminiAuthMode, setGeminiAuthMode] = useState<"apikey" | "oauth">(
-    settings.externalKeys?.googleOAuthToken ? "oauth" : "apikey"
+    settings.externalKeys?.geminiAuthMode ??
+      (settings.externalKeys?.gemini ? "apikey" : settings.externalKeys?.googleOAuthToken ? "oauth" : "apikey")
   );
 
   // OAuth Modal State
@@ -214,6 +566,98 @@ export function AiSettingsCard({
   const [providerCategoryFilter, setProviderCategoryFilter] = useState<string>("all");
   const [editingProviderId, setEditingProviderId] = useState<string | null>(null);
 
+  // Live Connection Testing State
+  const [testState, setTestState] = useState<{
+    status: "idle" | "testing" | "success" | "error";
+    provider?: string;
+    latencyMs?: number;
+    response?: string;
+    error?: string;
+  }>({ status: "idle" });
+
+  const handleTestConnection = async (
+    overrideProvider?: string,
+    overrideModel?: string,
+    overrideKey?: string,
+    overrideEndpoint?: string
+  ) => {
+    const targetProvider = overrideProvider || provider;
+    const targetModel = overrideModel || model;
+
+    let apiKey: string | undefined = overrideKey;
+    if (!apiKey) {
+      if (targetProvider === "anthropic") {
+        apiKey = anthropicAuthMode === "oauth" ? externalKeys.anthropicOAuthToken : externalKeys.anthropic;
+      } else if (targetProvider === "gemini") {
+        apiKey = geminiAuthMode === "oauth" ? externalKeys.googleOAuthToken : externalKeys.gemini;
+      } else if (targetProvider === "groq") {
+        apiKey = externalKeys.groqKey;
+      } else if (targetProvider === "cerebras") {
+        apiKey = externalKeys.cerebrasKey;
+      } else if (targetProvider === "mistral") {
+        apiKey = externalKeys.mistralKey;
+      } else if (targetProvider === "openai") {
+        apiKey = externalKeys.openai;
+      } else if (targetProvider === "openrouter") {
+        apiKey = externalKeys.openrouter;
+      } else if (targetProvider === "freellmapi") {
+        apiKey = externalKeys.freellmapiKey;
+      } else {
+        apiKey = externalKeys.providerKeys?.[targetProvider];
+      }
+    }
+
+    const endpoint =
+      overrideEndpoint ||
+      (targetProvider === "freellmapi"
+        ? externalKeys.freellmapiEndpoint
+        : externalKeys.providerEndpoints?.[targetProvider]);
+
+    setTestState({ status: "testing", provider: targetProvider });
+
+    try {
+      const res = await api<{
+        ok: boolean;
+        provider?: string;
+        model?: string;
+        latencyMs?: number;
+        response?: string;
+        error?: string;
+      }>("/models/test", {
+        method: "POST",
+        body: {
+          provider: targetProvider,
+          model: targetModel,
+          apiKey,
+          endpoint,
+          anthropicAuthMode,
+          geminiAuthMode,
+        },
+      });
+
+      if (res.ok) {
+        setTestState({
+          status: "success",
+          provider: targetProvider,
+          latencyMs: res.latencyMs,
+          response: res.response,
+        });
+      } else {
+        setTestState({
+          status: "error",
+          provider: targetProvider,
+          error: res.error || "Connection test failed.",
+        });
+      }
+    } catch (err: any) {
+      setTestState({
+        status: "error",
+        provider: targetProvider,
+        error: err?.message || "Failed to contact backend test endpoint.",
+      });
+    }
+  };
+
   const catProvider = FREE_LLM_PROVIDERS.find((p) => p.id === provider);
   const activeProviderInfo: ProviderDef =
     PROVIDERS.find((p) => p.id === provider) ??
@@ -229,13 +673,14 @@ export function AiSettingsCard({
 
   const handleProviderSelect = (newProvider: LLMProviderId) => {
     setProvider(newProvider);
+    setTestState({ status: "idle" });
     const catEntry = FREE_LLM_PROVIDERS.find((cp) => cp.id === newProvider);
     if (catEntry) {
       setModel(catEntry.defaultModel);
       return;
     }
     if (newProvider === "workers-ai") {
-      if (!model.startsWith("@cf/")) setModel("@cf/meta/llama-3.3-70b-instruct-fp8-fast");
+      if (!model.startsWith("@cf/")) setModel("@cf/zai-org/glm-4.7-flash");
     } else if (newProvider === "freellmapi") {
       if (!model.startsWith("freellmapi/") && !model.includes("gemini") && !model.includes("llama")) {
         setModel("freellmapi/auto");
@@ -253,11 +698,11 @@ export function AiSettingsCard({
         setModel("mistral-small-latest");
       }
     } else if (newProvider === "anthropic") {
-      if (!model.startsWith("claude-")) setModel("claude-3-7-sonnet-20250219");
+      if (!model.startsWith("claude-")) setModel("claude-sonnet-4-5-20250929");
     } else if (newProvider === "openai") {
       if (!model.startsWith("gpt-") && !model.startsWith("o")) setModel("gpt-4o");
     } else if (newProvider === "openrouter") {
-      if (!model.includes("/")) setModel("anthropic/claude-3.7-sonnet");
+      if (!model.includes("/")) setModel("meta-llama/llama-3.3-70b-instruct:free");
     } else if (newProvider === "gemini") {
       if (!model.startsWith("gemini-")) setModel("gemini-2.0-flash");
     }
@@ -321,13 +766,19 @@ export function AiSettingsCard({
     });
   };
 
+  const currentExternalKeys: ExternalKeys = {
+    ...externalKeys,
+    anthropicAuthMode,
+    geminiAuthMode,
+  };
+
   const handleSaveAll = () => {
     onSave({
       provider,
       model: model.trim(),
       temperature,
       limits,
-      externalKeys,
+      externalKeys: currentExternalKeys,
       fallbacks,
       autoFailover,
       budget,
@@ -339,7 +790,7 @@ export function AiSettingsCard({
     model !== settings.model ||
     temperature !== settings.temperature ||
     JSON.stringify(limits) !== JSON.stringify(settings.limits) ||
-    JSON.stringify(externalKeys) !== JSON.stringify(settings.externalKeys ?? {}) ||
+    JSON.stringify(currentExternalKeys) !== JSON.stringify(settings.externalKeys ?? {}) ||
     JSON.stringify(fallbacks) !== JSON.stringify(settings.fallbacks ?? []) ||
     autoFailover !== (settings.autoFailover ?? true) ||
     JSON.stringify(budget) !== JSON.stringify(settings.budget ?? {});
@@ -403,6 +854,125 @@ export function AiSettingsCard({
           </div>
         </Card>
       </section>
+
+      {/* Provider Setup Guide & Quick Start */}
+      {PROVIDER_GUIDES[provider] && (() => {
+        const guide = PROVIDER_GUIDES[provider]!;
+        return (
+          <section className="space-y-2 animate-fade-in">
+            <div className="flex items-center justify-between px-1">
+              <h2 className="text-xs font-medium uppercase tracking-wider text-fg-subtle flex items-center gap-1.5">
+                <Sparkles className="h-3.5 w-3.5 text-accent" />
+                Setup Guide &amp; Free Tier: {guide.title}
+              </h2>
+              <Badge tone={guide.badgeTone || "accent"} className="text-[10px]">
+                {guide.badge}
+              </Badge>
+            </div>
+            <Card className="p-4 bg-gradient-to-br from-surface to-subtle border-border space-y-3.5">
+              <p className="text-xs text-fg-muted leading-relaxed">
+                {guide.summary}
+              </p>
+
+              {/* Visual Numbered Steps */}
+              <div className="grid gap-2 sm:grid-cols-3">
+                {guide.steps.map((s) => (
+                  <div
+                    key={s.num}
+                    className="rounded-xl border border-border bg-surface/80 p-3 flex flex-col justify-between space-y-2"
+                  >
+                    <div className="space-y-1.5">
+                      <span className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-accent/20 text-accent text-[11px] font-bold">
+                        {s.num}
+                      </span>
+                      <p className="text-[11px] text-fg-muted leading-snug">{s.text}</p>
+                    </div>
+                    {s.link && (
+                      <a
+                        href={s.link.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[11px] font-medium text-accent hover:underline flex items-center gap-1 pt-1"
+                      >
+                        {s.link.label} <ExternalLink className="h-3 w-3" />
+                      </a>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {/* Free Presets 1-Click Buttons */}
+              {guide.freePresets.length > 0 && (
+                <div className="pt-2 border-t border-border">
+                  <span className="text-[11px] font-medium text-fg-subtle">
+                    Recommended Presets (click to select):
+                  </span>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {guide.freePresets.map((preset) => (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => setModel(preset.id)}
+                        className={cn(
+                          "flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border transition-all text-left",
+                          model === preset.id
+                            ? "border-accent bg-accent/15 text-fg font-semibold ring-1 ring-accent"
+                            : "border-border bg-surface text-fg-muted hover:border-border-strong hover:bg-subtle"
+                        )}
+                      >
+                        <span>{preset.label}</span>
+                        <Badge
+                          tone={model === preset.id ? "accent" : "neutral"}
+                          className="text-[9px] px-1 py-0"
+                        >
+                          {preset.tag}
+                        </Badge>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Test Connection Action Bar */}
+              <div className="pt-2.5 border-t border-border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5">
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                    onClick={() => handleTestConnection()}
+                    loading={testState.status === "testing"}
+                    className="h-8 text-xs font-semibold border-accent/40 text-accent hover:bg-accent/10"
+                  >
+                    <Zap className="h-3.5 w-3.5 mr-1.5" />
+                    Test Connection Now
+                  </Button>
+                  <span className="text-[11px] text-fg-subtle hidden sm:inline">
+                    Sends a test ping to verify credentials and response latency.
+                  </span>
+                </div>
+
+                {testState.status === "success" && (
+                  <div className="inline-flex items-center gap-1.5 text-xs text-emerald-500 font-medium bg-emerald-500/10 px-2.5 py-1 rounded-md border border-emerald-500/20">
+                    <Check className="h-3.5 w-3.5 shrink-0" />
+                    <span>Connected ({testState.latencyMs}ms): &quot;{testState.response}&quot;</span>
+                  </div>
+                )}
+
+                {testState.status === "error" && (
+                  <div
+                    className="inline-flex items-center gap-1.5 text-xs text-danger font-medium bg-danger/10 px-2.5 py-1 rounded-md border border-danger/20 max-w-sm truncate"
+                    title={testState.error}
+                  >
+                    <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate">Error: {testState.error}</span>
+                  </div>
+                )}
+              </div>
+            </Card>
+          </section>
+        );
+      })()}
 
       {/* Model Selection Card */}
       <section className="space-y-2">
@@ -568,14 +1138,19 @@ export function AiSettingsCard({
                   <div>
                     <label className="text-xs font-medium text-fg">Endpoint URL</label>
                     <Input
-                      value={externalKeys.freellmapiEndpoint ?? "http://localhost:3001/v1"}
-                      onChange={(e) =>
-                        setExternalKeys({ ...externalKeys, freellmapiEndpoint: e.target.value })
-                      }
-                      placeholder="http://localhost:3001/v1 or https://your-freellmapi-host/v1"
+                      value={externalKeys.freellmapiEndpoint ?? ""}
+                      onChange={(e) => {
+                        let val = e.target.value.trim();
+                        if (val.startsWith("ttp://")) val = "http://" + val.slice(6);
+                        if (val.startsWith("ttps://")) val = "https://" + val.slice(7);
+                        setExternalKeys({ ...externalKeys, freellmapiEndpoint: val });
+                      }}
+                      placeholder="Leave blank for built-in cloud free router, or enter public https://..."
                       className="mt-1 font-mono text-xs"
                     />
-                    <p className="text-[10px] text-fg-subtle mt-1">Default local: http://localhost:3001/v1</p>
+                    <p className="text-[10px] text-fg-subtle mt-1">
+                      Leave blank to use built-in cloud free models (Pollinations &amp; Workers AI). Cloudflare Workers cannot reach localhost/127.0.0.1.
+                    </p>
                   </div>
 
                   <div>
@@ -1179,6 +1754,15 @@ export function AiSettingsCard({
                       {isEditing ? "Close" : "Config"}
                     </button>
                     <div className="flex items-center gap-1.5">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => handleTestConnection(p.id, p.defaultModel, customKey, customEndpoint)}
+                        className="h-6 px-2 text-[10px] text-accent hover:bg-accent/10"
+                        title="Test live connectivity to this provider"
+                      >
+                        <Zap className="h-2.5 w-2.5 mr-0.5" /> Test
+                      </Button>
                       <Button
                         size="sm"
                         variant="ghost"
